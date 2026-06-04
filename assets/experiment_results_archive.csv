@@ -28,4 +28,4 @@ tb64_best_of_two,64,MBPP,128,Tree-only,4.60,7.89,325.29,,,best of two DDTree-sty
 tb64_best_of_two,64,MBPP,128,ReTree,5.45,8.12,326.30,,450,best of two ReTree runs
 tb64_best_of_two,64,MT-Bench,80,DFlash local,2.28,4.27,494.23,,,local SDPA/linear run; tree budget independent
 tb64_best_of_two,64,MT-Bench,80,Tree-only,3.04,5.81,509.23,,,best of two DDTree-style tree-only runs
-tb64_best_of_two,64,MT-Bench,80,ReTree,3.33,5.90,502.73,,883,best of two ReTree runs
+tb64_best_of_two,64,MT-Bench,80,ReTree,3.44,5.90,502.73,,883,best of two ReTree runs

@@ -55,8 +55,8 @@ small trees more effective, so each user can receive fewer speculative nodes
 while still getting strong accepted-token length.
 
 In the current SDPA prototype, ReTree with a 32-node tree reaches 5.23x average
-speedup, while a 64-node tree reaches 5.41x. The 32-node setting therefore
-captures 96.7% of the 64-node speedup while using half the tree budget. This is
+speedup, while a 64-node tree reaches 5.43x. The 32-node setting therefore
+captures 96.3% of the 64-node speedup while using half the tree budget. This is
 the main serving signal: under tight per-user budgets, ReTree can keep most of
 the benefit of a larger tree.
 
@@ -98,69 +98,38 @@ Summary rows use arithmetic mean.
 
 ![ReTree tree budget comparison](assets/budget_comparison.svg)
 
+The figure compares DFlash, ReTree with a 32-node tree, and ReTree with a
+64-node tree on both speedup and accepted length.
+
 | Setting | Average speedup | Average accepted length |
 | --- | ---: | ---: |
 | DFlash reference | 4.82x | 6.24 |
 | ReTree, budget 32 | 5.23x | 7.84 |
-| ReTree, budget 64 | 5.41x | 8.29 |
+| ReTree, budget 64 | 5.43x | 8.29 |
 
-### Tree Budget 32
+Detailed per-task values are stored in `assets/results_summary.csv` and
+`assets/results_summary_tb64.csv`.
 
-![ReTree benchmark summary](assets/results_overview.svg)
+### Recovery Statistics
 
-The figure reports both speedup and accepted length, with an explicit Average
-bar in each panel.
+The main comparison above uses speedup and accepted length. The recovery counts
+below show how often ReTree's correction memory keeps target-supported tokens
+after a mismatch.
 
-| Dataset | Samples | DFlash reference | ReTree | ReTree vs DFlash |
-| --- | ---: | ---: | ---: | ---: |
-| GSM8K | 128 | 5.20x | 5.56x | +6.9% |
-| MATH-500 | 128 | 6.17x | 6.39x | +3.6% |
-| HumanEval | 164 | 5.20x | 5.70x | +9.6% |
-| MBPP | 128 | 4.75x | 5.26x | +10.7% |
-| MT-Bench | 80 | 2.79x | 3.25x | +16.5% |
-| Average | - | 4.82x | 5.23x | +8.5% |
-
-| Dataset | DFlash accepted length | ReTree accepted length | ReTree recovered tokens |
-| --- | ---: | ---: | ---: |
-| GSM8K | 6.57 | 8.27 | 455 |
-| MATH-500 | 7.88 | 9.38 | 693 |
-| HumanEval | 6.56 | 8.29 | 782 |
-| MBPP | 5.94 | 7.73 | 458 |
-| MT-Bench | 4.27 | 5.52 | 948 |
-| Average / Total | 6.24 | 7.84 | 3,336 |
+| Dataset | ReTree-32 recovered tokens | ReTree-64 recovered tokens |
+| --- | ---: | ---: |
+| GSM8K | 455 | 401 |
+| MATH-500 | 693 | 648 |
+| HumanEval | 782 | 722 |
+| MBPP | 458 | 450 |
+| MT-Bench | 948 | 883 |
+| Total | 3,336 | 3,104 |
 
 For exact-match math benchmarks, ReTree reaches 89.1% on GSM8K and 78.1% on
-MATH-500 while improving speed.
+MATH-500 with a 32-node tree, and 89.8% on GSM8K and 76.6% on MATH-500 with a
+64-node tree.
 
 ![ReTree recovered tokens, budget 32](assets/recovery_tb32.svg)
-
-### Tree Budget 64
-
-![ReTree benchmark summary, tree budget 64](assets/results_overview_tb64.svg)
-
-The figure reports both speedup and accepted length, with an explicit Average
-bar in each panel.
-
-| Dataset | Samples | DFlash reference | ReTree | ReTree vs DFlash |
-| --- | ---: | ---: | ---: | ---: |
-| GSM8K | 128 | 5.20x | 5.76x | +10.8% |
-| MATH-500 | 128 | 6.17x | 6.51x | +5.5% |
-| HumanEval | 164 | 5.20x | 6.00x | +15.4% |
-| MBPP | 128 | 4.75x | 5.45x | +14.7% |
-| MT-Bench | 80 | 2.79x | 3.33x | +19.4% |
-| Average | - | 4.82x | 5.41x | +12.2% |
-
-| Dataset | DFlash accepted length | ReTree accepted length | ReTree recovered tokens |
-| --- | ---: | ---: | ---: |
-| GSM8K | 6.57 | 8.62 | 401 |
-| MATH-500 | 7.88 | 9.93 | 648 |
-| HumanEval | 6.56 | 8.89 | 722 |
-| MBPP | 5.94 | 8.12 | 450 |
-| MT-Bench | 4.27 | 5.90 | 883 |
-| Average / Total | 6.24 | 8.29 | 3,104 |
-
-For exact-match math benchmarks, ReTree reaches 89.8% on GSM8K and 76.6% on
-MATH-500.
 
 ![ReTree recovered tokens, budget 64](assets/recovery_tb64.svg)
 

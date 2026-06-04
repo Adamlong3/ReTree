@@ -1,0 +1,31 @@
+run_group,tree_budget,dataset,samples,method,speedup,avg_accept_len,avg_output_tokens,accuracy_pct,recovered_tokens,note
+tb32_final,32,GSM8K,128,DFlash local,4.06,6.57,298.16,89.1,,local SDPA/linear run
+tb32_final,32,GSM8K,128,Tree-only,5.12,8.00,300.38,89.8,,previous DDTree-style tree-only run
+tb32_final,32,GSM8K,128,ReTree,5.56,8.27,294.84,89.1,455,latest ReTree run
+tb32_final,32,MATH-500,128,DFlash local,4.89,7.88,767.40,76.6,,local SDPA/linear run
+tb32_final,32,MATH-500,128,Tree-only,6.29,9.25,737.48,75.0,,previous DDTree-style tree-only run
+tb32_final,32,MATH-500,128,ReTree,6.39,9.38,731.10,78.1,693,latest ReTree run
+tb32_final,32,HumanEval,164,DFlash local,4.18,6.56,463.47,,,local SDPA/linear run
+tb32_final,32,HumanEval,164,Tree-only,5.61,8.22,452.87,,,previous DDTree-style tree-only run
+tb32_final,32,HumanEval,164,ReTree,5.70,8.29,458.92,,782,latest ReTree run
+tb32_final,32,MBPP,128,DFlash local,3.88,5.94,324.48,,,local SDPA/linear run
+tb32_final,32,MBPP,128,Tree-only,4.83,7.42,323.73,,,previous DDTree-style tree-only run
+tb32_final,32,MBPP,128,ReTree,5.26,7.73,335.81,,458,latest ReTree run
+tb32_final,32,MT-Bench,80,DFlash local,2.28,4.27,494.23,,,local run; tree budget independent
+tb32_final,32,MT-Bench,80,Tree-only,2.79,5.42,491.97,,,previous DDTree-style tree-only run
+tb32_final,32,MT-Bench,80,ReTree,3.25,5.52,496.63,,948,latest ReTree run
+tb64_best_of_two,64,GSM8K,128,DFlash local,4.04,6.57,298.16,89.1,,local SDPA/linear run; tree budget independent
+tb64_best_of_two,64,GSM8K,128,Tree-only,5.32,8.46,300.62,88.3,,best of two DDTree-style tree-only runs
+tb64_best_of_two,64,GSM8K,128,ReTree,5.76,8.62,292.59,89.8,401,best of two ReTree runs
+tb64_best_of_two,64,MATH-500,128,DFlash local,4.76,7.88,767.40,76.6,,local SDPA/linear run; tree budget independent
+tb64_best_of_two,64,MATH-500,128,Tree-only,6.32,9.67,736.33,80.5,,best of two DDTree-style tree-only runs
+tb64_best_of_two,64,MATH-500,128,ReTree,6.51,9.93,767.03,76.6,648,best of two ReTree runs
+tb64_best_of_two,64,HumanEval,164,DFlash local,4.23,6.56,463.47,,,local SDPA/linear run; tree budget independent
+tb64_best_of_two,64,HumanEval,164,Tree-only,5.69,8.64,458.01,,,best of two DDTree-style tree-only runs
+tb64_best_of_two,64,HumanEval,164,ReTree,6.00,8.89,452.21,,722,best of two ReTree runs
+tb64_best_of_two,64,MBPP,128,DFlash local,3.72,5.94,324.48,,,local SDPA/linear run; tree budget independent
+tb64_best_of_two,64,MBPP,128,Tree-only,4.60,7.89,325.29,,,best of two DDTree-style tree-only runs
+tb64_best_of_two,64,MBPP,128,ReTree,5.45,8.12,326.30,,450,best of two ReTree runs
+tb64_best_of_two,64,MT-Bench,80,DFlash local,2.28,4.27,494.23,,,local SDPA/linear run; tree budget independent
+tb64_best_of_two,64,MT-Bench,80,Tree-only,3.04,5.81,509.23,,,best of two DDTree-style tree-only runs
+tb64_best_of_two,64,MT-Bench,80,ReTree,3.33,5.90,502.73,,883,best of two ReTree runs

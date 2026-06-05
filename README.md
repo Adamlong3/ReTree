@@ -129,9 +129,7 @@ For exact-match math benchmarks, ReTree reaches 89.1% on GSM8K and 78.1% on
 MATH-500 with a 32-node tree, and 89.8% on GSM8K and 76.6% on MATH-500 with a
 64-node tree.
 
-![ReTree recovered tokens, budget 32](assets/recovery_tb32.svg)
-
-![ReTree recovered tokens, budget 64](assets/recovery_tb64.svg)
+![ReTree recovered tokens by tree budget](assets/recovery_combined.svg)
 
 ## Setup
 

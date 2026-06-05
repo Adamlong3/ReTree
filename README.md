@@ -24,6 +24,13 @@ a single linear proposal. For every decoding round, it builds a probability-
 ranked tree under a fixed node budget, verifies the tree with the target model,
 then commits the longest target-supported path.
 
+The figure below shows the tree verification and calibrated recovery path:
+ReTree verifies ancestor-consistent candidate branches, finds the longest exact
+match, and then uses correction memory plus a target-logit gate to rescue a
+target-supported alternative after the first mismatch.
+
+![ReTree tree verification and recovery flow](assets/retree_tree_recovery.png)
+
 At mismatch points, ReTree can still accept a candidate child when two checks
 pass:
 

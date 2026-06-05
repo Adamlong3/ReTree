@@ -1,6 +1,8 @@
 # ReTree
 
-Paper: coming soon | Target: [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) | Draft: [z-lab/Qwen3-8B-DFlash-b16](https://huggingface.co/z-lab/Qwen3-8B-DFlash-b16) | DFlash reference: [z-lab/dflash](https://github.com/z-lab/dflash)
+**Paper:** coming soon.
+
+Target: [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) | Draft: [z-lab/Qwen3-8B-DFlash-b16](https://huggingface.co/z-lab/Qwen3-8B-DFlash-b16) | DFlash reference: [z-lab/dflash](https://github.com/z-lab/dflash)
 
 ReTree is a tree-structured speculative decoding prototype for DFlash-style
 block draft models. It expands a compact speculative tree from draft logits,

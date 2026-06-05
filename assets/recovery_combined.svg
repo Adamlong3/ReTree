@@ -1,53 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="660" viewBox="0 0 1180 660" role="img" aria-label="ReTree Recovered Tokens by Tree Budget">
-<rect x="0" y="0" width="1180" height="660" rx="0" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="700" viewBox="0 0 1180 700" role="img" aria-label="ReTree Recovered Tokens by Tree Budget">
+<rect x="0" y="0" width="1180" height="700" rx="0" fill="#ffffff"/>
 <text x="44" y="56" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="34" font-weight="750" fill="#0f172a">ReTree Recovered Tokens by Tree Budget</text>
 <text x="44" y="92" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="400" fill="#475569">Additional accepted tokens recovered by ReTree correction memory.</text>
-<rect x="892" y="36" width="18" height="18" rx="5" fill="#2563eb"/>
-<text x="922" y="51" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="650" fill="#334155">Tree budget 32</text>
-<rect x="892" y="68" width="18" height="18" rx="5" fill="#0f766e"/>
-<text x="922" y="83" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="650" fill="#334155">Tree budget 64</text>
-<line x1="110" y1="470.0" x2="1110" y2="470.0" stroke="#e2e8f0" stroke-width="1"/>
-<text x="92" y="476.0" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">0</text>
-<line x1="110" y1="387.5" x2="1110" y2="387.5" stroke="#e2e8f0" stroke-width="1"/>
-<text x="92" y="393.5" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">250</text>
-<line x1="110" y1="305.0" x2="1110" y2="305.0" stroke="#e2e8f0" stroke-width="1"/>
-<text x="92" y="311.0" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">500</text>
-<line x1="110" y1="222.5" x2="1110" y2="222.5" stroke="#e2e8f0" stroke-width="1"/>
-<text x="92" y="228.5" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">750</text>
-<line x1="110" y1="140.0" x2="1110" y2="140.0" stroke="#e2e8f0" stroke-width="1"/>
-<text x="92" y="146.0" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">1000</text>
-<text x="44" y="120" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#334155">Recovered tokens</text>
-<rect x="169" y="319.9" width="34" height="150.2" rx="8" fill="#2563eb"/>
-<text x="186" y="307.9" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#2563eb">455</text>
-<rect x="217" y="337.7" width="34" height="132.3" rx="8" fill="#0f766e"/>
-<text x="234" y="325.7" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#0f766e">401</text>
-<text x="210" y="512" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">GSM8K</text>
-<text x="210" y="540" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="400" fill="#64748b">accept 32/64: 8.27/8.62</text>
-<rect x="369" y="241.3" width="34" height="228.7" rx="8" fill="#2563eb"/>
-<text x="386" y="229.3" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#2563eb">693</text>
-<rect x="417" y="256.2" width="34" height="213.8" rx="8" fill="#0f766e"/>
-<text x="434" y="244.2" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#0f766e">648</text>
-<text x="410" y="512" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">MATH-500</text>
-<text x="410" y="540" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="400" fill="#64748b">accept 32/64: 9.38/9.93</text>
-<rect x="569" y="211.9" width="34" height="258.1" rx="8" fill="#2563eb"/>
-<text x="586" y="199.9" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#2563eb">782</text>
-<rect x="617" y="231.7" width="34" height="238.3" rx="8" fill="#0f766e"/>
-<text x="634" y="219.7" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#0f766e">722</text>
-<text x="610" y="512" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">HumanEval</text>
-<text x="610" y="540" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="400" fill="#64748b">accept 32/64: 8.29/8.89</text>
-<rect x="769" y="318.9" width="34" height="151.1" rx="8" fill="#2563eb"/>
-<text x="786" y="306.9" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#2563eb">458</text>
-<rect x="817" y="321.5" width="34" height="148.5" rx="8" fill="#0f766e"/>
-<text x="834" y="309.5" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#0f766e">450</text>
-<text x="810" y="512" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">MBPP</text>
-<text x="810" y="540" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="400" fill="#64748b">accept 32/64: 7.73/8.12</text>
-<rect x="969" y="157.2" width="34" height="312.8" rx="8" fill="#2563eb"/>
-<text x="986" y="145.2" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#2563eb">948</text>
-<rect x="1017" y="178.6" width="34" height="291.4" rx="8" fill="#0f766e"/>
-<text x="1034" y="166.6" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="750" fill="#0f766e">883</text>
-<text x="1010" y="512" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">MT-Bench</text>
-<text x="1010" y="540" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="400" fill="#64748b">accept 32/64: 5.52/5.90</text>
-<rect x="44" y="582" width="1092" height="52" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
-<text x="72" y="604" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="500" fill="#475569">Correction memory: budget 32 has 283,154 token pairs and 926,277 recorded events.</text>
-<text x="72" y="625" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="500" fill="#475569">Budget 64 has 338,198 token pairs and 1,167,973 recorded events; top_k=8.</text>
+<rect x="888" y="24" width="248" height="88" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+<rect x="912" y="39" width="18" height="18" rx="5" fill="#f59e0b"/>
+<text x="942" y="54" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="650" fill="#334155">Tree budget 16</text>
+<rect x="912" y="64" width="18" height="18" rx="5" fill="#2563eb"/>
+<text x="942" y="79" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="650" fill="#334155">Tree budget 32</text>
+<rect x="912" y="89" width="18" height="18" rx="5" fill="#0f766e"/>
+<text x="942" y="104" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="650" fill="#334155">Tree budget 64</text>
+<line x1="110" y1="492" x2="1110" y2="492" stroke="#e2e8f0" stroke-width="1"/>
+<text x="92" y="498" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">0</text>
+<line x1="110" y1="404.5" x2="1110" y2="404.5" stroke="#e2e8f0" stroke-width="1"/>
+<text x="92" y="410.5" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">300</text>
+<line x1="110" y1="317" x2="1110" y2="317" stroke="#e2e8f0" stroke-width="1"/>
+<text x="92" y="323" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">600</text>
+<line x1="110" y1="229.5" x2="1110" y2="229.5" stroke="#e2e8f0" stroke-width="1"/>
+<text x="92" y="235.5" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">900</text>
+<line x1="110" y1="142" x2="1110" y2="142" stroke="#e2e8f0" stroke-width="1"/>
+<text x="92" y="148" text-anchor="end" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="400" fill="#64748b">1200</text>
+<text x="44" y="122" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#334155">Recovered tokens</text>
+<rect x="160" y="336" width="28" height="156" rx="8" fill="#f59e0b"/>
+<text x="174" y="326" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#f59e0b">535</text>
+<rect x="196" y="359.3" width="28" height="132.7" rx="8" fill="#2563eb"/>
+<text x="210" y="349.3" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#2563eb">455</text>
+<rect x="232" y="375" width="28" height="117" rx="8" fill="#0f766e"/>
+<text x="246" y="365" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#0f766e">401</text>
+<text x="210" y="533" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">GSM8K</text>
+<text x="210" y="560" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="400" fill="#64748b">accept 16/32/64: 7.67/8.27/8.62</text>
+<rect x="360" y="246.7" width="28" height="245.3" rx="8" fill="#f59e0b"/>
+<text x="374" y="236.7" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#f59e0b">841</text>
+<rect x="396" y="289.9" width="28" height="202.1" rx="8" fill="#2563eb"/>
+<text x="410" y="279.9" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#2563eb">693</text>
+<rect x="432" y="303" width="28" height="189" rx="8" fill="#0f766e"/>
+<text x="446" y="293" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#0f766e">648</text>
+<text x="410" y="533" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">MATH-500</text>
+<text x="410" y="560" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="400" fill="#64748b">accept 16/32/64: 8.78/9.38/9.93</text>
+<rect x="560" y="226" width="28" height="266" rx="8" fill="#f59e0b"/>
+<text x="574" y="216" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#f59e0b">912</text>
+<rect x="596" y="263.9" width="28" height="228.1" rx="8" fill="#2563eb"/>
+<text x="610" y="253.89999999999998" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#2563eb">782</text>
+<rect x="632" y="281.4" width="28" height="210.6" rx="8" fill="#0f766e"/>
+<text x="646" y="271.4" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#0f766e">722</text>
+<text x="610" y="533" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">HumanEval</text>
+<text x="610" y="560" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="400" fill="#64748b">accept 16/32/64: 7.64/8.29/8.89</text>
+<rect x="760" y="343.5" width="28" height="148.5" rx="8" fill="#f59e0b"/>
+<text x="774" y="333.5" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#f59e0b">509</text>
+<rect x="796" y="358.4" width="28" height="133.6" rx="8" fill="#2563eb"/>
+<text x="810" y="348.4" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#2563eb">458</text>
+<rect x="832" y="360.8" width="28" height="131.2" rx="8" fill="#0f766e"/>
+<text x="846" y="350.8" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#0f766e">450</text>
+<text x="810" y="533" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">MBPP</text>
+<text x="810" y="560" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="400" fill="#64748b">accept 16/32/64: 7.02/7.73/8.12</text>
+<rect x="960" y="186.6" width="28" height="305.4" rx="8" fill="#f59e0b"/>
+<text x="974" y="176.6" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#f59e0b">1047</text>
+<rect x="996" y="215.5" width="28" height="276.5" rx="8" fill="#2563eb"/>
+<text x="1010" y="205.5" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#2563eb">948</text>
+<rect x="1032" y="234.5" width="28" height="257.5" rx="8" fill="#0f766e"/>
+<text x="1046" y="224.5" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="750" fill="#0f766e">883</text>
+<text x="1010" y="533" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="650" fill="#334155">MT-Bench</text>
+<text x="1010" y="560" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="400" fill="#64748b">accept 16/32/64: 5.16/5.52/5.90</text>
+<rect x="44" y="604" width="1092" height="70" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="72" y="628" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="500" fill="#475569">Correction memory: budget 16 has 190,205 token pairs and 547,380 recorded events; budget 32 has 283,154 pairs and 926,277 events.</text>
+<text x="72" y="650" text-anchor="start" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="500" fill="#475569">Budget 64 has 338,198 token pairs and 1,167,973 recorded events; top_k=8 for all recovery runs.</text>
 </svg>

@@ -54,11 +54,12 @@ can reduce capacity for other concurrent requests. ReTree is designed to make
 small trees more effective, so each user can receive fewer speculative nodes
 while still getting strong accepted-token length.
 
-In the current SDPA prototype, ReTree with a 32-node tree reaches 5.23x average
-speedup, while a 64-node tree reaches 5.43x. The 32-node setting therefore
-captures 96.3% of the 64-node speedup while using half the tree budget. This is
-the main serving signal: under tight per-user budgets, ReTree can keep most of
-the benefit of a larger tree.
+In the current SDPA prototype, ReTree with a 16-node tree reaches 4.92x average
+speedup, a 32-node tree reaches 5.23x, and a 64-node tree reaches 5.43x. The
+16-node setting captures 90.6% of the 64-node speedup while using one quarter
+of the tree budget, and the 32-node setting captures 96.3% while using half the
+tree budget. This is the main serving signal: under tight per-user budgets,
+ReTree can keep most of the benefit of a larger tree.
 
 ReTree is being integrated into SGLang-style serving. The raw wall-clock
 speedup in a serving backend may differ from official DFlash deployments, but
@@ -98,17 +99,18 @@ Summary rows use arithmetic mean.
 
 ![ReTree tree budget comparison](assets/budget_comparison.svg)
 
-The figure compares DFlash, ReTree with a 32-node tree, and ReTree with a
-64-node tree on both speedup and accepted length.
+The figure compares DFlash, ReTree with a 16-node tree, ReTree with a 32-node
+tree, and ReTree with a 64-node tree on both speedup and accepted length.
 
 | Setting | Average speedup | Average accepted length |
 | --- | ---: | ---: |
 | DFlash reference | 4.82x | 6.24 |
+| ReTree, budget 16 | 4.92x | 7.25 |
 | ReTree, budget 32 | 5.23x | 7.84 |
 | ReTree, budget 64 | 5.43x | 8.29 |
 
-Detailed per-task values are stored in `assets/results_summary.csv` and
-`assets/results_summary_tb64.csv`.
+Detailed per-task values are stored in `assets/results_summary_tb16.csv`,
+`assets/results_summary.csv`, and `assets/results_summary_tb64.csv`.
 
 ### Recovery Statistics
 
@@ -116,18 +118,18 @@ The main comparison above uses speedup and accepted length. The recovery counts
 below show how often ReTree's correction memory keeps target-supported tokens
 after a mismatch.
 
-| Dataset | ReTree-32 recovered tokens | ReTree-64 recovered tokens |
-| --- | ---: | ---: |
-| GSM8K | 455 | 401 |
-| MATH-500 | 693 | 648 |
-| HumanEval | 782 | 722 |
-| MBPP | 458 | 450 |
-| MT-Bench | 948 | 883 |
-| Total | 3,336 | 3,104 |
+| Dataset | ReTree-16 recovered tokens | ReTree-32 recovered tokens | ReTree-64 recovered tokens |
+| --- | ---: | ---: | ---: |
+| GSM8K | 535 | 455 | 401 |
+| MATH-500 | 841 | 693 | 648 |
+| HumanEval | 912 | 782 | 722 |
+| MBPP | 509 | 458 | 450 |
+| MT-Bench | 1,047 | 948 | 883 |
+| Total | 3,844 | 3,336 | 3,104 |
 
-For exact-match math benchmarks, ReTree reaches 89.1% on GSM8K and 78.1% on
-MATH-500 with a 32-node tree, and 89.8% on GSM8K and 76.6% on MATH-500 with a
-64-node tree.
+For exact-match math benchmarks, ReTree reaches 93.0% on GSM8K and 76.6% on
+MATH-500 with a 16-node tree, 89.1% on GSM8K and 78.1% on MATH-500 with a
+32-node tree, and 89.8% on GSM8K and 76.6% on MATH-500 with a 64-node tree.
 
 ![ReTree recovered tokens by tree budget](assets/recovery_combined.svg)
 

@@ -43,6 +43,15 @@ python benchmark.py --methods dflash,ddtree,ddtree_csd --csd-calibration-file ..
 The printed method name `DDTree+CSD` is the ReTree recovery path. Plain `DDTree`
 under `rank_gated_ngram` is the path-guided tree without recovery.
 
+## Path-Guided Tree Construction
+
+![Path-guided tree construction](assets/retree_path_guided_tree.png)
+
+The tree builder keeps DDTree's fixed-budget verification interface, but changes
+node priority by combining draft rank with a local continuity bonus from the
+visible request prefix. The rank gate keeps this bonus conservative by applying
+it only to high-ranked draft candidates.
+
 ## Results
 
 The main low-budget comparison uses a 16-node tree budget, block size 16, a

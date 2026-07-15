@@ -1,14 +1,27 @@
 import argparse
 import random
+import time
 
 import numpy as np
 import torch
 from tqdm import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
-from model import DFlashDraftModel, sample, extract_context_feature, load_and_process_dataset
-from model.correction import OnlineCorrectionMemory, token_pair_has_stop
-from tree import build_retree_tree, compile_retree_tree, compact_dynamic_cache, follow_verified_tree
+from model import (
+    DFlashDraftModel,
+    sample,
+    extract_context_feature,
+    load_and_process_dataset,
+)
+from model.csd import OnlineCorrectionMemory, token_pair_has_stop
+from dflash import cuda_time
+from ddtree import (
+    build_ddtree_tree,
+    compile_ddtree_tree,
+    compact_dynamic_cache,
+    follow_verified_tree,
+    maybe_enable_cpp_compact,
+)
 
 
 def rank_children_by_target_logits(
@@ -34,14 +47,14 @@ def rank_children_by_target_logits(
 
 
 @torch.inference_mode()
-def calibrate_retree_memory(
+def calibrate_ocm_ddtree(
     model: DFlashDraftModel,
     target: AutoModelForCausalLM,
     input_ids: torch.Tensor,
     mask_token_id: int,
     max_new_tokens: int,
     block_size: int,
-    memory: OnlineCorrectionMemory,
+    ocm: OnlineCorrectionMemory,
     tree_budget: int,
     temperature: float = 0.6,
     record_top_k: int = 8,
@@ -60,14 +73,20 @@ def calibrate_retree_memory(
     )
     position_ids = torch.arange(output_ids.shape[1], device=model.device).unsqueeze(0)
 
-    verify_input_ids_buffer = torch.empty((1, max_tree_nodes), dtype=torch.long, device=model.device)
-    verify_position_ids_buffer = torch.empty((1, max_tree_nodes), dtype=torch.long, device=model.device)
+    verify_input_ids_buffer = torch.empty(
+        (1, max_tree_nodes), dtype=torch.long, device=model.device
+    )
+    verify_position_ids_buffer = torch.empty(
+        (1, max_tree_nodes), dtype=torch.long, device=model.device
+    )
     attention_mask_buffer = torch.zeros(
         (1, 1, max_tree_nodes, max_length + max_tree_nodes),
         dtype=target.dtype,
         device=model.device,
     )
-    tree_visibility_buffer = torch.empty((max_tree_nodes, max_tree_nodes), dtype=torch.bool, device=model.device)
+    tree_visibility_buffer = torch.empty(
+        (max_tree_nodes, max_tree_nodes), dtype=torch.bool, device=model.device
+    )
 
     past_key_values_target = DynamicCache()
     past_key_values_draft = DynamicCache()
@@ -82,8 +101,12 @@ def calibrate_retree_memory(
     )
 
     output_ids[:, :num_input_tokens] = input_ids
-    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(output.logits, temperature)
-    target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids)
+    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(
+        output.logits, temperature
+    )
+    target_hidden = extract_context_feature(
+        output.hidden_states, model.target_layer_ids
+    )
 
     start = input_ids.shape[1]
     draft_prefill = True
@@ -96,23 +119,41 @@ def calibrate_retree_memory(
         root_token = block_output_ids[:, :1]
 
         noise_embedding = target.model.embed_tokens(block_output_ids)
-        draft_logits = target.lm_head(model(
-            target_hidden=target_hidden,
-            noise_embedding=noise_embedding,
-            position_ids=position_ids[:, past_key_values_draft.get_seq_length() : start + block_size],
-            past_key_values=past_key_values_draft,
-            use_cache=True,
-            is_causal=False,
-        )[:, -draft_horizon:, :])
+        draft_logits = target.lm_head(
+            model(
+                target_hidden=target_hidden,
+                noise_embedding=noise_embedding,
+                position_ids=position_ids[
+                    :, past_key_values_draft.get_seq_length() : start + block_size
+                ],
+                past_key_values=past_key_values_draft,
+                use_cache=True,
+                is_causal=False,
+            )[:, -draft_horizon:, :]
+        )
         past_key_values_draft.crop(start)
         if draft_prefill:
             draft_prefill = False
 
-        node_token_ids, node_depths, parents, child_maps, visibility_cpu, _ = build_retree_tree(
-            draft_logits[0], tree_budget
+        tree_context_ids = output_ids[0, : start + 1]
+        (
+            node_token_ids,
+            node_depths,
+            parents,
+            child_maps,
+            visibility_cpu,
+            _,
+        ) = build_ddtree_tree(
+            draft_logits[0], tree_budget, context_ids=tree_context_ids
         )
 
-        verify_input_ids, verify_position_ids, verify_attention_mask, previous_tree_start, previous_tree_length = compile_retree_tree(
+        (
+            verify_input_ids,
+            verify_position_ids,
+            verify_attention_mask,
+            previous_tree_start,
+            previous_tree_length,
+        ) = compile_ddtree_tree(
             root_token_id=root_token[0, 0],
             start=start,
             node_token_ids=node_token_ids,
@@ -151,8 +192,13 @@ def calibrate_retree_memory(
             if len(children) == 0:
                 break
 
+            # Do not record divergence pairs whose target token is EOS / stop token.
+            # Otherwise OCM will learn high-frequency pairs like "\n\n" -> "<|im_end|>",
+            # which can later make CSD override the target's stop decision.
             target_tok = int(next_token)
 
+            # Stop-token-safe calibration:
+            # If target wants EOS / stop token, do not record child -> stop pairs.
             if stop_token_ids is not None and target_tok in stop_token_ids:
                 break
 
@@ -162,23 +208,30 @@ def calibrate_retree_memory(
                 position=current_index,
             )
 
+            # Record only top-k non-stop alternatives to avoid OCM pollution.
             recorded = 0
             for child_tok in ranked_child_tokens:
                 child_tok = int(child_tok)
 
+                # If exact target child exists, do not record target itself as divergence.
                 if child_tok == target_tok:
                     continue
 
+                # Stop-token-safe calibration:
+                # Do not record either direction:
+                #   X -> EOS
+                #   EOS -> X
                 if token_pair_has_stop(child_tok, target_tok, stop_token_ids):
                     continue
 
-                memory.update(child_tok, target_tok)
+                ocm.update(child_tok, target_tok)
                 divergence_count += 1
                 recorded += 1
 
                 if recorded >= record_top_k:
                     break
 
+            # Follow exact path if possible; otherwise stop calibration for this round.
             if next_token in children:
                 current_index = children[next_token]
                 next_token = int(posterior_tokens[current_index])
@@ -186,14 +239,18 @@ def calibrate_retree_memory(
                 break
 
         accepted_indices, next_token = follow_verified_tree(child_maps, posterior)
-        accepted_index_tensor = torch.tensor(accepted_indices, dtype=torch.long, device=verify_input_ids.device)
+        accepted_index_tensor = torch.tensor(
+            accepted_indices, dtype=torch.long, device=verify_input_ids.device
+        )
         accepted_tokens = verify_input_ids.index_select(1, accepted_index_tensor)
 
         output_ids[:, start : start + len(accepted_indices)] = accepted_tokens
         output_ids[:, start + len(accepted_indices)] = next_token
 
         compact_dynamic_cache(past_key_values_target, start, accepted_indices)
-        target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids).index_select(1, accepted_index_tensor)
+        target_hidden = extract_context_feature(
+            output.hidden_states, model.target_layer_ids
+        ).index_select(1, accepted_index_tensor)
 
         start += len(accepted_indices)
 
@@ -223,22 +280,32 @@ def main() -> None:
     torch.cuda.manual_seed_all(0)
 
     device = torch.device("cuda:0")
-    target = AutoModelForCausalLM.from_pretrained(
-        args.model_name_or_path,
-        attn_implementation="sdpa",
-        dtype=torch.bfloat16,
-    ).to(device).eval()
+    target = (
+        AutoModelForCausalLM.from_pretrained(
+            args.model_name_or_path,
+            attn_implementation="sdpa",
+            dtype=torch.bfloat16,
+        )
+        .to(device)
+        .eval()
+    )
 
     draft_config = AutoConfig.from_pretrained(args.draft_name_or_path)
     if getattr(draft_config, "fusion_target_layers", None) is None:
         draft_config.fusion_target_layers = [1, 9, 17, 25, 33]
+    if getattr(draft_config, "num_recurrent_steps", None) is None:
+        draft_config.num_recurrent_steps = 1
 
-    draft_model = DFlashDraftModel.from_pretrained(
-        args.draft_name_or_path,
-        config=draft_config,
-        attn_implementation="flash_attention_2",
-        dtype=torch.bfloat16,
-    ).to(device).eval()
+    draft_model = (
+        DFlashDraftModel.from_pretrained(
+            args.draft_name_or_path,
+            config=draft_config,
+            attn_implementation="sdpa",
+            dtype=torch.bfloat16,
+        )
+        .to(device)
+        .eval()
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
@@ -255,19 +322,23 @@ def main() -> None:
             f"target embedding size={vocab_size}."
         )
 
-    print(f"Using draft_model.mask_token_id={draft_model.mask_token_id}, target_vocab_size={vocab_size}")
+    print(
+        f"Using draft_model.mask_token_id={draft_model.mask_token_id}, target_vocab_size={vocab_size}"
+    )
 
     dataset = load_and_process_dataset(args.dataset)
     if len(dataset) > args.max_samples:
         dataset = dataset.shuffle(seed=0).select(range(args.max_samples))
 
-    memory = OnlineCorrectionMemory(freq_threshold=0)
+    ocm = OnlineCorrectionMemory(freq_threshold=0)
 
-    stop_token_ids = {int(tokenizer.eos_token_id)} if tokenizer.eos_token_id is not None else None
+    stop_token_ids = (
+        {int(tokenizer.eos_token_id)} if tokenizer.eos_token_id is not None else None
+    )
     print(f"Calibration stop_token_ids={stop_token_ids}")
 
     total_divergences = 0
-    for idx in tqdm(range(len(dataset)), desc="Calibrating ReTree memory"):
+    for idx in tqdm(range(len(dataset)), desc="Calibrating DDTree OCM"):
         instance = dataset[idx]
         messages = [{"role": "user", "content": instance["turns"][0]}]
         input_text = tokenizer.apply_chat_template(
@@ -278,14 +349,14 @@ def main() -> None:
         )
         input_ids = tokenizer.encode(input_text, return_tensors="pt").to(device)
 
-        div_count = calibrate_retree_memory(
+        div_count = calibrate_ocm_ddtree(
             model=draft_model,
             target=target,
             input_ids=input_ids,
             mask_token_id=draft_model.mask_token_id,
             max_new_tokens=args.max_new_tokens,
             block_size=args.block_size,
-            memory=memory,
+            ocm=ocm,
             tree_budget=args.tree_budget,
             temperature=args.temperature,
             record_top_k=args.record_top_k,
@@ -294,20 +365,20 @@ def main() -> None:
         total_divergences += div_count
 
     if args.output_file is None:
-        output_file = f"logs/retree_memory_tb{args.tree_budget}_{args.dataset}_{args.max_samples}samples.json"
+        output_file = f"logs/ocm_ddtree_tb{args.tree_budget}_{args.dataset}_{args.max_samples}samples.json"
     else:
         output_file = args.output_file
 
-    memory.save(output_file)
+    ocm.save(output_file)
     print(f"\n{'='*50}")
-    print("ReTree Memory Calibration Complete!")
+    print(f"DDTree OCM Calibration Complete!")
     print(f"Tree budget: {args.tree_budget}")
     print(f"Total divergences recorded: {total_divergences}")
-    print(f"Memory unique pairs: {memory.total_pairs()}")
-    print(f"Memory total events: {memory.total_rejections()}")
-    print(f"Memory saved to: {output_file}")
-    top10 = memory.top_k_pairs(10)
-    print("Top-10 most frequent divergence pairs:")
+    print(f"OCM unique pairs: {ocm.total_pairs()}")
+    print(f"OCM total rejections: {ocm.total_rejections()}")
+    print(f"OCM saved to: {output_file}")
+    top10 = ocm.top_k_pairs(10)
+    print(f"Top-10 most frequent divergence pairs:")
     for (d_tok, t_tok), freq in top10:
         d_str = tokenizer.decode([d_tok])
         t_str = tokenizer.decode([t_tok])

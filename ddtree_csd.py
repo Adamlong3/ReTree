@@ -1,18 +1,24 @@
+import time
 from types import SimpleNamespace
 
 import torch
 from transformers import AutoModelForCausalLM, DynamicCache
 
 from model import DFlashDraftModel, sample, extract_context_feature
-from model.correction import OnlineCorrectionMemory, semantic_consistency_gate, token_pair_has_stop
+from model.csd import (
+    OnlineCorrectionMemory,
+    semantic_consistency_gate,
+    token_pair_has_stop,
+)
 from dflash import dflash_generate, cuda_time, empty_stage_times
-from tree import (
-    build_retree_tree,
-    compile_retree_tree,
+from ddtree import (
+    build_ddtree_tree,
+    compile_ddtree_tree,
     compact_dynamic_cache,
     follow_verified_tree,
-    TREE_STAGE_ORDER,
-    TREE_BUILD_STAGE_ORDER,
+    maybe_enable_cpp_compact,
+    DDTREE_STAGE_ORDER,
+    DDTREE_TREE_BUILD_STAGE_ORDER,
 )
 
 
@@ -48,19 +54,33 @@ def _rank_children_by_target_logits(
     return ranked
 
 
-def follow_verified_tree_with_recovery(
+def follow_verified_tree_csd(
     child_maps: list[dict[int, int]],
     posterior: torch.Tensor,
     target_logits: torch.Tensor,
-    correction_memory: OnlineCorrectionMemory,
-    consistency_threshold: float = 0.01,
+    ocm: OnlineCorrectionMemory,
+    scg_threshold: float = 0.01,
     online_update: bool = False,
     record_top_k: int = 8,
-    recover_top_k: int = 8,
-    disallow_recovery_target_ids: set[int] | None = None,
+    rescue_top_k: int = 16,
+    disallow_rescue_target_ids: set[int] | None = None,
 ) -> tuple[list[int], int, int]:
     """
-    ReTree tree verifier with correction-memory recovery.
+    DDTree + CSD verifier.
+
+    1. If target posterior token exists in current node's children:
+           exact accept.
+    2. Else:
+           try CSD rescue.
+           Candidate child must satisfy:
+               OCM[(child_token, target_token)] >= lambda
+               and SCG(child_token, target_token) passes.
+
+    Default mode is offline-only:
+        online_update=False
+
+    For offline+online ablation:
+        online_update=True
     """
     posterior_tokens = posterior[0].tolist()
     logits_2d = target_logits[0]
@@ -68,62 +88,90 @@ def follow_verified_tree_with_recovery(
     accepted_indices = [0]
     current_index = 0
     next_token = int(posterior_tokens[current_index])
-    num_recovered = 0
+    num_rescued = 0
 
     while True:
         children = child_maps[current_index]
 
+        # 1. Standard DDTree exact accept.
         if next_token in children:
             current_index = children[next_token]
             accepted_indices.append(current_index)
             next_token = int(posterior_tokens[current_index])
             continue
 
+        # 2. Exact accept failed and no child can be rescued.
         if len(children) == 0:
             break
 
-        if disallow_recovery_target_ids is not None and int(next_token) in disallow_recovery_target_ids:
+        # 2.5 If target wants EOS / stop token, do not rescue.
+        # Let target's stop token be committed by the normal DDTree commit path.
+        if (
+            disallow_rescue_target_ids is not None
+            and int(next_token) in disallow_rescue_target_ids
+        ):
             break
 
+        # 3. Rank children by target confidence at current parent node.
         ranked_children = _rank_children_by_target_logits(
             children=children,
             logits_2d=logits_2d,
             position=current_index,
         )
 
-        recovery_candidates = ranked_children[:recover_top_k]
+        rescue_candidates = ranked_children[:rescue_top_k]
+
+        # 4. Check frequency BEFORE optional online update.
+        #    This avoids the current mismatch making itself immediately frequent.
         target_tok = int(next_token)
         frequent_before_update = {}
 
-        for child_tok, _ in recovery_candidates:
+        for child_tok, _ in rescue_candidates:
             child_tok = int(child_tok)
 
-            if token_pair_has_stop(child_tok, target_tok, disallow_recovery_target_ids):
+            # Stop-token-safe frequency check:
+            # Never allow CSD pair involving EOS / stop token.
+            if token_pair_has_stop(child_tok, target_tok, disallow_rescue_target_ids):
                 frequent_before_update[child_tok] = False
             else:
-                frequent_before_update[child_tok] = correction_memory.is_frequent(child_tok, target_tok)
+                frequent_before_update[child_tok] = ocm.is_frequent(
+                    child_tok, target_tok
+                )
 
+        # 5. Optional online OCM update.
+        #    Only record top-k non-stop children to avoid polluting OCM.
         if online_update and record_top_k > 0:
             recorded = 0
 
             for child_tok, _ in ranked_children:
                 child_tok = int(child_tok)
 
-                if token_pair_has_stop(child_tok, target_tok, disallow_recovery_target_ids):
+                # Stop-token-safe online update:
+                # Do not record either direction:
+                #   X -> EOS
+                #   EOS -> X
+                if token_pair_has_stop(
+                    child_tok, target_tok, disallow_rescue_target_ids
+                ):
                     continue
 
-                correction_memory.update(child_tok, target_tok)
+                ocm.update(child_tok, target_tok)
                 recorded += 1
 
                 if recorded >= record_top_k:
                     break
 
-        recovered = False
+        # 6. CSD rescue.
+        rescued = False
 
-        for child_tok, child_idx in recovery_candidates:
+        for child_tok, child_idx in rescue_candidates:
             child_tok = int(child_tok)
 
-            if token_pair_has_stop(child_tok, target_tok, disallow_recovery_target_ids):
+            # Stop-token-safe rescue:
+            # Do not rescue either direction:
+            #   target wants EOS, accept non-EOS
+            #   target wants non-EOS, accept EOS
+            if token_pair_has_stop(child_tok, target_tok, disallow_rescue_target_ids):
                 continue
 
             if not frequent_before_update.get(child_tok, False):
@@ -134,7 +182,7 @@ def follow_verified_tree_with_recovery(
                 draft_token_id=child_tok,
                 target_top_token_id=target_tok,
                 position=current_index,
-                threshold=consistency_threshold,
+                threshold=scg_threshold,
             )
 
             if not is_safe:
@@ -142,19 +190,19 @@ def follow_verified_tree_with_recovery(
 
             current_index = child_idx
             accepted_indices.append(current_index)
-            num_recovered += 1
+            num_rescued += 1
             next_token = int(posterior_tokens[current_index])
-            recovered = True
+            rescued = True
             break
 
-        if not recovered:
+        if not rescued:
             break
 
-    return accepted_indices, next_token, num_recovered
+    return accepted_indices, next_token, num_rescued
 
 
 @torch.inference_mode()
-def retree_generate(
+def ddtree_csd_generate(
     model: DFlashDraftModel,
     target: AutoModelForCausalLM,
     input_ids: torch.Tensor,
@@ -164,11 +212,11 @@ def retree_generate(
     stop_token_ids: list[int],
     temperature: float = 0.0,
     tree_budget: int | None = None,
-    correction_memory: OnlineCorrectionMemory | None = None,
-    correction_threshold: float = 0.01,
-    correction_online_update: bool = False,
-    correction_record_top_k: int = 8,
-    correction_recover_top_k: int = 8,
+    ocm: OnlineCorrectionMemory | None = None,
+    scg_threshold: float = 0.01,
+    csd_online_update: bool = False,
+    csd_record_top_k: int = 8,
+    csd_rescue_top_k: int = 16,
 ) -> SimpleNamespace:
     if block_size <= 1:
         return dflash_generate(
@@ -195,24 +243,36 @@ def retree_generate(
         device=model.device,
     )
     position_ids = torch.arange(output_ids.shape[1], device=model.device).unsqueeze(0)
-    stop_token_ids_tensor = None if stop_token_ids is None else torch.tensor(stop_token_ids, device=model.device)
+    stop_token_ids_tensor = (
+        None
+        if stop_token_ids is None
+        else torch.tensor(stop_token_ids, device=model.device)
+    )
 
-    disallow_recovery_target_ids = None
+    disallow_rescue_target_ids = None
     if stop_token_ids is not None:
-        disallow_recovery_target_ids = {int(tok) for tok in stop_token_ids if tok is not None}
+        disallow_rescue_target_ids = {
+            int(tok) for tok in stop_token_ids if tok is not None
+        }
 
-    verify_input_ids_buffer = torch.empty((1, max_tree_nodes), dtype=torch.long, device=model.device)
-    verify_position_ids_buffer = torch.empty((1, max_tree_nodes), dtype=torch.long, device=model.device)
+    verify_input_ids_buffer = torch.empty(
+        (1, max_tree_nodes), dtype=torch.long, device=model.device
+    )
+    verify_position_ids_buffer = torch.empty(
+        (1, max_tree_nodes), dtype=torch.long, device=model.device
+    )
     attention_mask_buffer = torch.zeros(
         (1, 1, max_tree_nodes, max_length + max_tree_nodes),
         dtype=target.dtype,
         device=model.device,
     )
-    tree_visibility_buffer = torch.empty((max_tree_nodes, max_tree_nodes), dtype=torch.bool, device=model.device)
+    tree_visibility_buffer = torch.empty(
+        (max_tree_nodes, max_tree_nodes), dtype=torch.bool, device=model.device
+    )
 
     past_key_values_target = DynamicCache()
     past_key_values_draft = DynamicCache()
-    stage_times = empty_stage_times(TREE_STAGE_ORDER + TREE_BUILD_STAGE_ORDER)
+    stage_times = empty_stage_times(DDTREE_STAGE_ORDER + DDTREE_TREE_BUILD_STAGE_ORDER)
 
     prefill_start = cuda_time()
     output = target(
@@ -225,8 +285,12 @@ def retree_generate(
     )
 
     output_ids[:, :num_input_tokens] = input_ids
-    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(output.logits, temperature)
-    target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids)
+    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(
+        output.logits, temperature
+    )
+    target_hidden = extract_context_feature(
+        output.hidden_states, model.target_layer_ids
+    )
 
     time_to_first_token = cuda_time() - prefill_start
 
@@ -238,7 +302,7 @@ def retree_generate(
     draft_prefill = True
     previous_tree_start = 0
     previous_tree_length = 0
-    total_recovered = 0
+    total_rescued = 0
 
     while start < max_length:
         block_output_ids = output_ids[:, start : start + block_size].clone()
@@ -246,14 +310,18 @@ def retree_generate(
 
         draft_stage_start = cuda_time()
         noise_embedding = target.model.embed_tokens(block_output_ids)
-        draft_logits = target.lm_head(model(
-            target_hidden=target_hidden,
-            noise_embedding=noise_embedding,
-            position_ids=position_ids[:, past_key_values_draft.get_seq_length() : start + block_size],
-            past_key_values=past_key_values_draft,
-            use_cache=True,
-            is_causal=False,
-        )[:, -draft_horizon:, :])
+        draft_logits = target.lm_head(
+            model(
+                target_hidden=target_hidden,
+                noise_embedding=noise_embedding,
+                position_ids=position_ids[
+                    :, past_key_values_draft.get_seq_length() : start + block_size
+                ],
+                past_key_values=past_key_values_draft,
+                use_cache=True,
+                is_causal=False,
+            )[:, -draft_horizon:, :]
+        )
         past_key_values_draft.crop(start)
         draft_stage_elapsed = cuda_time() - draft_stage_start
         if draft_prefill:
@@ -263,15 +331,29 @@ def retree_generate(
             stage_times["draft"] += draft_stage_elapsed
 
         tree_build_start = cuda_time()
-        node_token_ids, node_depths, parents, child_maps, visibility_cpu, tree_build_subtimes = build_retree_tree(
-            draft_logits[0], tree_budget
+        tree_context_ids = output_ids[0, : start + 1]
+        (
+            node_token_ids,
+            node_depths,
+            parents,
+            child_maps,
+            visibility_cpu,
+            tree_build_subtimes,
+        ) = build_ddtree_tree(
+            draft_logits[0], tree_budget, context_ids=tree_context_ids
         )
         stage_times["tree_build"] += cuda_time() - tree_build_start
         for stage_name, stage_elapsed in tree_build_subtimes.items():
             stage_times[stage_name] += stage_elapsed
 
         tree_compile_start = cuda_time()
-        verify_input_ids, verify_position_ids, verify_attention_mask, previous_tree_start, previous_tree_length = compile_retree_tree(
+        (
+            verify_input_ids,
+            verify_position_ids,
+            verify_attention_mask,
+            previous_tree_start,
+            previous_tree_length,
+        ) = compile_ddtree_tree(
             root_token_id=root_token[0, 0],
             start=start,
             node_token_ids=node_token_ids,
@@ -303,30 +385,34 @@ def retree_generate(
         commit_stage_start = cuda_time()
         posterior = sample(output.logits, temperature)
 
-        if correction_memory is not None:
-            accepted_indices, next_token, num_recovered = follow_verified_tree_with_recovery(
+        if ocm is not None:
+            accepted_indices, next_token, num_rescued = follow_verified_tree_csd(
                 child_maps=child_maps,
                 posterior=posterior,
                 target_logits=output.logits,
-                correction_memory=correction_memory,
-                consistency_threshold=correction_threshold,
-                online_update=correction_online_update,
-                record_top_k=correction_record_top_k,
-                recover_top_k=correction_recover_top_k,
-                disallow_recovery_target_ids=disallow_recovery_target_ids,
+                ocm=ocm,
+                scg_threshold=scg_threshold,
+                online_update=csd_online_update,
+                record_top_k=csd_record_top_k,
+                rescue_top_k=csd_rescue_top_k,
+                disallow_rescue_target_ids=disallow_rescue_target_ids,
             )
-            total_recovered += num_recovered
+            total_rescued += num_rescued
         else:
             accepted_indices, next_token = follow_verified_tree(child_maps, posterior)
 
-        accepted_index_tensor = torch.tensor(accepted_indices, dtype=torch.long, device=verify_input_ids.device)
+        accepted_index_tensor = torch.tensor(
+            accepted_indices, dtype=torch.long, device=verify_input_ids.device
+        )
         accepted_tokens = verify_input_ids.index_select(1, accepted_index_tensor)
 
         output_ids[:, start : start + len(accepted_indices)] = accepted_tokens
         output_ids[:, start + len(accepted_indices)] = next_token
 
         compact_dynamic_cache(past_key_values_target, start, accepted_indices)
-        target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids).index_select(1, accepted_index_tensor)
+        target_hidden = extract_context_feature(
+            output.hidden_states, model.target_layer_ids
+        ).index_select(1, accepted_index_tensor)
 
         acceptance_lengths.append(len(accepted_indices))
         start += len(accepted_indices)
@@ -341,7 +427,9 @@ def retree_generate(
     output_ids = output_ids[:, :max_length]
     output_ids = output_ids[:, output_ids[0] != mask_token_id]
     if stop_token_ids_tensor is not None:
-        stop_token_indices = torch.isin(output_ids[0][num_input_tokens:], stop_token_ids_tensor).nonzero(as_tuple=True)[0]
+        stop_token_indices = torch.isin(
+            output_ids[0][num_input_tokens:], stop_token_ids_tensor
+        ).nonzero(as_tuple=True)[0]
         if stop_token_indices.numel() > 0:
             output_ids = output_ids[:, : num_input_tokens + stop_token_indices[0] + 1]
 
@@ -359,8 +447,5 @@ def retree_generate(
         decode_rounds=len(acceptance_lengths),
         stage_times=stage_times,
         round_timestamps=round_timestamps,
-        total_recovered=total_recovered,
+        total_rescued=total_rescued,
     )
-
-
-__all__ = ["retree_generate", "follow_verified_tree_with_recovery"]

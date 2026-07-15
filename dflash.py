@@ -31,7 +31,11 @@ def dflash_generate(
         device=model.device,
     )
     position_ids = torch.arange(output_ids.shape[1], device=model.device).unsqueeze(0)
-    stop_token_ids_tensor = None if stop_token_ids is None else torch.tensor(stop_token_ids, device=model.device)
+    stop_token_ids_tensor = (
+        None
+        if stop_token_ids is None
+        else torch.tensor(stop_token_ids, device=model.device)
+    )
 
     past_key_values_target = DynamicCache()
     past_key_values_draft = DynamicCache()
@@ -48,9 +52,13 @@ def dflash_generate(
     )
 
     output_ids[:, :num_input_tokens] = input_ids
-    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(output.logits, temperature)
+    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(
+        output.logits, temperature
+    )
     if block_size > 1:
-        target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids)
+        target_hidden = extract_context_feature(
+            output.hidden_states, model.target_layer_ids
+        )
 
     time_to_first_token = cuda_time() - prefill_start
 
@@ -67,14 +75,18 @@ def dflash_generate(
         if block_size > 1:
             draft_stage_start = cuda_time()
             noise_embedding = target.model.embed_tokens(block_output_ids)
-            draft_logits = target.lm_head(model(
-                target_hidden=target_hidden,
-                noise_embedding=noise_embedding,
-                position_ids=position_ids[:, past_key_values_draft.get_seq_length() : start + block_size],
-                past_key_values=past_key_values_draft,
-                use_cache=True,
-                is_causal=False,
-            )[:, -block_size + 1 :, :])
+            draft_logits = target.lm_head(
+                model(
+                    target_hidden=target_hidden,
+                    noise_embedding=noise_embedding,
+                    position_ids=position_ids[
+                        :, past_key_values_draft.get_seq_length() : start + block_size
+                    ],
+                    past_key_values=past_key_values_draft,
+                    use_cache=True,
+                    is_causal=False,
+                )[:, -block_size + 1 :, :]
+            )
             past_key_values_draft.crop(start)
             block_output_ids[:, 1:] = sample(draft_logits)
             draft_stage_elapsed = cuda_time() - draft_stage_start
@@ -96,15 +108,24 @@ def dflash_generate(
 
         commit_stage_start = cuda_time()
         posterior = sample(output.logits, temperature)
-        acceptance_length = (block_output_ids[:, 1:] == posterior[:, :-1]).cumprod(dim=1).sum(dim=1)[0].item()
-        output_ids[:, start : start + acceptance_length + 1] = block_output_ids[:, : acceptance_length + 1]
+        acceptance_length = (
+            (block_output_ids[:, 1:] == posterior[:, :-1])
+            .cumprod(dim=1)
+            .sum(dim=1)[0]
+            .item()
+        )
+        output_ids[:, start : start + acceptance_length + 1] = block_output_ids[
+            :, : acceptance_length + 1
+        ]
         output_ids[:, start + acceptance_length + 1] = posterior[:, acceptance_length]
 
         acceptance_lengths.append(acceptance_length + 1)
         start += acceptance_length + 1
         past_key_values_target.crop(start)
         if block_size > 1:
-            target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids)[:, : acceptance_length + 1, :]
+            target_hidden = extract_context_feature(
+                output.hidden_states, model.target_layer_ids
+            )[:, : acceptance_length + 1, :]
         stage_times["commit"] += cuda_time() - commit_stage_start
         round_timestamps.append(cuda_time() - round_clock_start)
 
@@ -116,7 +137,9 @@ def dflash_generate(
     output_ids = output_ids[:, :max_length]
     output_ids = output_ids[:, output_ids[0] != mask_token_id]
     if stop_token_ids_tensor is not None:
-        stop_token_indices = torch.isin(output_ids[0][num_input_tokens:], stop_token_ids_tensor).nonzero(as_tuple=True)[0]
+        stop_token_indices = torch.isin(
+            output_ids[0][num_input_tokens:], stop_token_ids_tensor
+        ).nonzero(as_tuple=True)[0]
         if stop_token_indices.numel() > 0:
             output_ids = output_ids[:, : num_input_tokens + stop_token_indices[0] + 1]
 

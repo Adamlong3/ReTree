@@ -3,6 +3,7 @@ import warnings
 from datetime import timedelta
 from typing import Any, List, Optional
 from torch import distributed as dist
+
 __all__ = [
     "init",
     "is_initialized",
@@ -15,11 +16,17 @@ __all__ = [
     "gather",
     "all_gather",
 ]
+
+
 def init() -> None:
     if "RANK" not in os.environ:
-        warnings.warn("Environment variable `RANK` is not set. Skipping distributed initialization.")
+        warnings.warn(
+            "Environment variable `RANK` is not set. Skipping distributed initialization."
+        )
         return
-    dist.init_process_group(backend="nccl", init_method="env://", timeout=timedelta(minutes=300))
+    dist.init_process_group(
+        backend="nccl", init_method="env://", timeout=timedelta(minutes=300)
+    )
 
 
 def is_initialized() -> bool:

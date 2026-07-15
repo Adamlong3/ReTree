@@ -1,3 +1,22 @@
 __pycache__/
 *.py[cod]
 logs/
+ocm/
+
+# Runtime and experiment output
+*.log
+/*.txt
+
+# LaTeX build products
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+
+# Local scratch assets and paper notes
+ChatGPT Image*.png
+domino_tree_*.pdf
+domino_tree_pdf_text.txt
+domino-tree.txt
+model/dflash_new.py

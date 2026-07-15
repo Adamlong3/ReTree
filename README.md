@@ -2,145 +2,90 @@
 
 **Paper:** coming soon.
 
-Target: [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) | Draft: [z-lab/Qwen3-8B-DFlash-b16](https://huggingface.co/z-lab/Qwen3-8B-DFlash-b16) | DFlash reference: [z-lab/dflash](https://github.com/z-lab/dflash)
+Target examples: [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B),
+[Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
+DFlash reference: [z-lab/dflash](https://github.com/z-lab/dflash)
 
-ReTree is a tree-structured speculative decoding prototype for DFlash-style
-block draft models. It expands a compact speculative tree from draft logits,
-verifies all candidate nodes with one target-model pass, and uses a calibrated
-correction memory to recover additional accepted tokens when target confidence
-supports a frequent draft-to-target mismatch.
+ReTree is a training-free inference-time method for budget-efficient tree
+speculative decoding with DFlash-style block draft models.
 
-## Highlights
+ReTree combines two pieces:
 
-- Tree-structured verification for DFlash block drafts.
-- Configurable tree budget for small-budget and high-speed settings.
-- Correction-memory calibration for conservative token recovery.
-- Benchmarks on GSM8K, MATH-500, HumanEval, MBPP, and MT-Bench.
-- Current prototype uses SDPA for target tree attention; SGLang integration is
-  in progress.
+- **Path-Guided Tree Construction**: builds a fixed-budget candidate tree from
+  draft logits plus request-local n-gram continuity.
+- **Target-Gated Sibling Recovery**: uses a calibrated online correction memory
+  and target-logit consistency checks to recover safe sibling tokens after the
+  first tree mismatch.
 
-## Method
+The code supports Qwen3-4B and Qwen3-8B DFlash draft checkpoints, DDTree-style
+tree verification, and distributed benchmarking over math, code, and chat
+tasks.
 
-ReTree treats each draft block as a set of likely continuation paths instead of
-a single linear proposal. For every decoding round, it builds a probability-
-ranked tree under a fixed node budget, verifies the tree with the target model,
-then commits the longest target-supported path.
+## Overview
 
-The figure below shows the tree verification and calibrated recovery path:
-ReTree verifies ancestor-consistent candidate branches, finds the longest exact
-match, and then uses correction memory plus a target-logit gate to rescue a
-target-supported alternative after the first mismatch.
+![ReTree overview](assets/retree_overview.png)
+
+At each decoding round, ReTree drafts a block distribution, constructs a
+budgeted token tree, verifies the tree with one target-model pass, then commits
+the longest target-supported path. If verification stops at a mismatch, the
+recovery module can accept an alternative sibling only when the correction pair
+is frequent and the target logits still support it.
 
 ![ReTree tree verification and recovery flow](assets/retree_tree_recovery.png)
 
-At mismatch points, ReTree can still accept a candidate child when two checks
-pass:
+In the benchmark logs, the full ReTree configuration is:
 
-- the draft-to-target token pair is frequent in the calibrated correction
-  memory, and
-- the candidate token remains close enough to the target top token under the
-  target logits.
+```bash
+DDTREE_TREE_STRATEGY=rank_gated_ngram
+python benchmark.py --methods dflash,ddtree,ddtree_csd --csd-calibration-file ...
+```
 
-This makes the recovery step conservative. ReTree only uses it after target
-verification reaches a mismatch, and stop tokens are excluded from correction
-memory updates and recovery decisions.
-
-## Model Setup
-
-ReTree follows the Qwen3-8B setup used by the DFlash Transformers example.
-
-| Role | Model |
-| --- | --- |
-| Target model | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
-| Draft model | [z-lab/Qwen3-8B-DFlash-b16](https://huggingface.co/z-lab/Qwen3-8B-DFlash-b16) |
-| Reference implementation | [z-lab/dflash](https://github.com/z-lab/dflash) |
-
-## Serving Motivation
-
-Tree speculation is most useful when each request has a limited speculative
-node budget. In continuous batching systems, giving one request a larger tree
-can reduce capacity for other concurrent requests. ReTree is designed to make
-small trees more effective, so each user can receive fewer speculative nodes
-while still getting strong accepted-token length.
-
-In the current SDPA prototype, ReTree with a 16-node tree reaches 4.92x average
-speedup, a 32-node tree reaches 5.23x, and a 64-node tree reaches 5.43x. The
-16-node setting captures 90.6% of the 64-node speedup while using one quarter
-of the tree budget, and the 32-node setting captures 96.3% while using half the
-tree budget. This is the main serving signal: under tight per-user budgets,
-ReTree can keep most of the benefit of a larger tree.
-
-ReTree is being integrated into SGLang-style serving. The raw wall-clock
-speedup in a serving backend may differ from official DFlash deployments, but
-accepted length and budget efficiency are the key algorithmic signals to track.
-
-Compared with tree-only speculative decoding work such as DDTree, ReTree's
-main advantage is budget efficiency rather than simply expanding a larger
-tree. The correction-memory recovery path helps a smaller speculative tree
-retain useful target-supported branches after a mismatch, so a 32-node ReTree
-run can approach the effect of a larger tree while spending fewer verification
-nodes per request.
-
-As a tree-only baseline context, the previous DDTree-style 64-node runs reached
-4.99x average speedup in the same SDPA prototype setting. ReTree with a 32-node
-tree reaches 5.23x, giving higher average speedup while using half the tree
-budget.
-
-| Dataset | Tree-only, budget 64 | ReTree, budget 32 | Delta |
-| --- | ---: | ---: | ---: |
-| GSM8K | 5.32x | 5.56x | +4.5% |
-| MATH-500 | 6.32x | 6.39x | +1.1% |
-| HumanEval | 5.69x | 5.70x | +0.2% |
-| MBPP | 4.60x | 5.26x | +14.3% |
-| MT-Bench | 3.04x | 3.25x | +6.9% |
-| Average | 4.99x | 5.23x | +4.8% |
+The printed method name `DDTree+CSD` is the ReTree recovery path. Plain `DDTree`
+under `rank_gated_ngram` is the path-guided tree without recovery.
 
 ## Results
 
-All ReTree results below use Qwen3-8B as the target model,
-Qwen3-8B-DFlash-b16 as the draft model, block size 16, temperature 0.0, and the
-SDPA target attention path for tree verification. The DFlash column is the
-official Qwen3-8B greedy decoding reference reported by the DFlash project
-page. Accepted-length numbers are measured from the local block-size-16 runs.
-Summary rows use arithmetic mean.
+The main low-budget comparison uses a 16-node tree budget, block size 16, a
+2048-token generation limit, and thinking disabled. Averages are arithmetic
+means over GSM8K, MATH-500, AIME25, HumanEval, MBPP, LiveCodeBench, and
+MT-Bench.
 
-### Budget Comparison
+![Low-budget benchmark](assets/retree_low_budget_benchmark.png)
 
-![ReTree tree budget comparison](assets/budget_comparison.svg)
+| Model | Temp. | Method | Avg. speedup | Avg. accepted length |
+| --- | ---: | --- | ---: | ---: |
+| Qwen3-4B | 0.0 | DFlash | 4.58x | 6.54 |
+| Qwen3-4B | 0.0 | DDTree (16) | 4.81x | 7.31 |
+| Qwen3-4B | 0.0 | ReTree (16) | **5.06x** | **7.86** |
+| Qwen3-8B | 0.0 | DFlash | 4.53x | 6.49 |
+| Qwen3-8B | 0.0 | DDTree (16) | 4.63x | 7.30 |
+| Qwen3-8B | 0.0 | ReTree (16) | **4.82x** | **7.77** |
+| Qwen3-4B | 1.0 | DFlash | 3.94x | 5.69 |
+| Qwen3-4B | 1.0 | DDTree (16) | 4.33x | 6.60 |
+| Qwen3-4B | 1.0 | ReTree (16) | **4.72x** | **7.38** |
+| Qwen3-8B | 1.0 | DFlash | 3.74x | 5.48 |
+| Qwen3-8B | 1.0 | DDTree (16) | 4.05x | 6.42 |
+| Qwen3-8B | 1.0 | ReTree (16) | **4.41x** | **7.13** |
 
-The figure compares DFlash, ReTree with a 16-node tree, ReTree with a 32-node
-tree, and ReTree with a 64-node tree on both speedup and accepted length.
+Full summary files are in `assets/main_results_low_budget.csv` and
+`assets/qwen3_4b_budget_sweep.csv`.
 
-| Setting | Average speedup | Average accepted length |
-| --- | ---: | ---: |
-| DFlash reference | 4.82x | 6.24 |
-| ReTree, budget 16 | 4.92x | 7.25 |
-| ReTree, budget 32 | 5.23x | 7.84 |
-| ReTree, budget 64 | 5.43x | 8.29 |
+## Budget Sweep
 
-Detailed per-task values are stored in `assets/results_summary_tb16.csv`,
-`assets/results_summary.csv`, and `assets/results_summary_tb64.csv`.
+![Budget sweep](assets/retree_budget_sweep.png)
 
-### Recovery Statistics
+The Qwen3-4B sweep compares DDTree, DominoTree, and ReTree over tree budgets
+16, 32, 64, 128, and 256. ReTree improves throughput in the low-budget regime
+while keeping construction latency close to DDTree.
 
-The main comparison above uses speedup and accepted length. The recovery counts
-below show how often ReTree's correction memory keeps target-supported tokens
-after a mismatch.
+## Recovery Statistics
 
-| Dataset | ReTree-16 recovered tokens | ReTree-32 recovered tokens | ReTree-64 recovered tokens |
-| --- | ---: | ---: | ---: |
-| GSM8K | 535 | 455 | 401 |
-| MATH-500 | 841 | 693 | 648 |
-| HumanEval | 912 | 782 | 722 |
-| MBPP | 509 | 458 | 450 |
-| MT-Bench | 1,047 | 948 | 883 |
-| Total | 3,844 | 3,336 | 3,104 |
+![Recovered tokens](assets/retree_recovery_counts.png)
 
-For exact-match math benchmarks, ReTree reaches 93.0% on GSM8K and 76.6% on
-MATH-500 with a 16-node tree, 89.1% on GSM8K and 78.1% on MATH-500 with a
-32-node tree, and 89.8% on GSM8K and 76.6% on MATH-500 with a 64-node tree.
-
-![ReTree recovered tokens by tree budget](assets/recovery_combined.svg)
+Recovered-token counts show where Target-Gated Sibling Recovery contributes
+extra accepted tokens after a mismatch. Counts are reported over the logged
+Qwen3-4B temperature-0.0 five-task subset. The numeric values are stored in
+`assets/recovery_counts_qwen3_4b_t0.csv`.
 
 ## Setup
 
@@ -151,84 +96,90 @@ pip install -r requirements.txt
 ```
 
 For best DFlash draft performance, install FlashAttention separately if your
-environment supports it.
+GPU and PyTorch build support it. The repository defaults to SDPA for target
+tree verification.
 
 ## Quick Start
 
-The launcher uses public model names by default:
+Run one benchmark with path-guided tree construction and a calibrated recovery
+memory:
 
 ```bash
-MODEL_PATH=Qwen/Qwen3-8B \
-DRAFT_PATH=z-lab/Qwen3-8B-DFlash-b16 \
-TREE_BUDGET=32 \
-METHODS=dflash,retree \
-CORRECTION_THRESHOLD=0.01 \
-CORRECTION_RECORD_TOP_K=8 \
-CORRECTION_RECOVER_TOP_K=8 \
-bash run_all.sh
-```
-
-To reproduce the five-task summary:
-
-```bash
-TASKS="gsm8k:128 math500:128 humaneval:164 mbpp:128 mt-bench:80" \
-METHODS=dflash,retree \
-bash run_all.sh
-```
-
-To run the benchmark after preparing a ReTree memory file:
-
-```bash
+DDTREE_TREE_STRATEGY=rank_gated_ngram \
+DDTREE_NGRAM_BETA=0.15 \
+DDTREE_NGRAM_RANK_CAP=8 \
 torchrun --nproc_per_node=4 benchmark.py \
   --dataset gsm8k \
   --max-samples 128 \
   --model-name-or-path Qwen/Qwen3-8B \
   --draft-name-or-path z-lab/Qwen3-8B-DFlash-b16 \
   --block-size 16 \
-  --tree-budget 32 \
-  --methods dflash,retree \
-  --correction-threshold 0.01 \
-  --correction-record-top-k 8 \
-  --correction-recover-top-k 8 \
-  --correction-memory-file logs/retree_memory_calibrated.json
+  --tree-budget 16 \
+  --max-new-tokens 2048 \
+  --temperature 0.0 \
+  --methods dflash,ddtree,ddtree_csd \
+  --csd-calibration-file ocm/merge/ocm_merged_16_8B.json \
+  --csd-freq-threshold 6 \
+  --csd-scg-threshold 0.01 \
+  --csd-record-top-k 8 \
+  --csd-rescue-top-k 8
 ```
 
-## Calibration
-
-`calibrate.py` builds the correction memory used by ReTree:
+Build a correction-memory file:
 
 ```bash
-python calibrate.py \
+DDTREE_TREE_STRATEGY=rank_gated_ngram \
+python csd_calibrate.py \
   --model-name-or-path Qwen/Qwen3-8B \
   --draft-name-or-path z-lab/Qwen3-8B-DFlash-b16 \
   --block-size 16 \
-  --tree-budget 32 \
+  --tree-budget 16 \
   --dataset gsm8k \
   --max-samples 2000 \
+  --max-new-tokens 512 \
+  --temperature 0.6 \
   --record-top-k 8 \
-  --output-file logs/retree_memory_calibrated.json
+  --output-file ocm/new/ocm_gsm8k_8B_tb16.json
 ```
 
-Generated logs and memory files are ignored by git.
+The full experiment launcher is configurable by environment variables:
+
+```bash
+MODEL_LIST="4B 8B" \
+TB_LIST="16 32 64 128 256" \
+MODEL_PATH_4B=/path/to/Qwen3-4B \
+DRAFT_PATH_4B=/path/to/Qwen3-4B-DFlash-b16 \
+MODEL_PATH_8B=/path/to/Qwen3-8B \
+DRAFT_PATH_8B=/path/to/Qwen3-8B-DFlash-b16 \
+LOCAL_DATASETS_ROOT=/path/to/huggingface-cache \
+bash run_all.sh
+```
+
+Generated logs, OCM files, and raw experiment notes are ignored by git.
+
+## Tree Strategy Knobs
+
+- `DDTREE_TREE_STRATEGY=heap`: original DDTree heap construction.
+- `DDTREE_TREE_STRATEGY=ngram`: online n-gram bonus for all candidate ranks.
+- `DDTREE_TREE_STRATEGY=rank_gated_ngram`: n-gram bonus only for top-ranked
+  candidate tokens; this is the default ReTree tree-construction variant.
+- `DDTREE_NGRAM_BETA`: path-continuity bonus scale, default `0.15`.
+- `DDTREE_NGRAM_RANK_CAP`: maximum candidate rank eligible for n-gram bonus,
+  default `8`.
+- `DDTREE_NGRAM_MAX_N`: maximum n-gram length, default `4`.
+- `DDTREE_NGRAM_CONTEXT_WINDOW`: context window for local n-gram counts,
+  default `2048`.
 
 ## Repository Layout
 
 - `benchmark.py`: distributed benchmark entry point.
-- `calibrate.py`: ReTree memory calibration.
+- `csd_calibrate.py`: offline correction-memory calibration.
+- `ddtree.py`: tree construction, one-pass verification, and cache compaction.
+- `ddtree_csd.py`: ReTree decoding path with target-gated sibling recovery.
 - `dflash.py`: linear DFlash speculative decoding baseline.
-- `tree.py`: tree construction, verification, and cache compaction helpers.
-- `retree.py`: ReTree decoding with correction-memory recovery.
-- `model/`: DFlash draft model and correction-memory utilities.
-- `run_all.sh`: example calibration and benchmark launcher.
-
-## Notes
-
-- This repository is a research prototype and assumes CUDA-capable hardware.
-- Current reported speedups are from the SDPA prototype path.
-- ReTree is being connected to SGLang-style serving for future multi-user
-  evaluation.
-- Local model paths can be passed with `MODEL_PATH` and `DRAFT_PATH` instead of
-  editing scripts.
+- `model/csd.py`: online correction memory and semantic consistency gate.
+- `model/dflash.py`: DFlash draft model implementation.
+- `run_all.sh`: full calibration, merge, benchmark, and log-summary pipeline.
 
 ## Related Work
 
@@ -236,8 +187,8 @@ Generated logs and memory files are ignored by git.
   speculative decoding.
 - DDTree-style dynamic tree verification: tree-structured verification for
   draft continuations under a fixed node budget.
-- Speculative decoding: target-model verification for lossless accelerated
-  generation.
+- DominoTree: high-acceptance tree construction with a larger construction-cost
+  profile in the budget sweep.
 
 ## License
 

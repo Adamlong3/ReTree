@@ -9,13 +9,9 @@ DFlash reference: [z-lab/dflash](https://github.com/z-lab/dflash)
 ReTree is a training-free inference-time method for budget-efficient tree
 speculative decoding with DFlash-style block draft models.
 
-ReTree combines two pieces:
-
-- **Path-Guided Tree Construction**: builds a fixed-budget candidate tree from
-  draft logits plus request-local n-gram continuity.
-- **Target-Gated Sibling Recovery**: uses a calibrated online correction memory
-  and target-logit consistency checks to recover safe sibling tokens after the
-  first tree mismatch.
+ReTree builds a request-aware speculative tree under a fixed node budget and
+uses target-gated recovery to safely accept additional sibling tokens after the
+first tree mismatch.
 
 The code supports Qwen3-4B and Qwen3-8B DFlash draft checkpoints, DDTree-style
 tree verification, and distributed benchmarking over math, code, and chat
@@ -28,10 +24,8 @@ tasks.
 At each decoding round, ReTree drafts a block distribution, constructs a
 budgeted token tree, verifies the tree with one target-model pass, then commits
 the longest target-supported path. If verification stops at a mismatch, the
-recovery module can accept an alternative sibling only when the correction pair
-is frequent and the target logits still support it.
-
-![ReTree tree verification and recovery flow](assets/retree_tree_recovery.png)
+recovery module can accept an alternative sibling only when the learned
+recovery memory and target logits both support it.
 
 In the benchmark logs, the full ReTree configuration is:
 
@@ -44,15 +38,6 @@ The printed method name `ReTree` is the full path-guided tree plus
 target-gated recovery path. Plain `DDTree` under `rank_gated_ngram` is the
 path-guided tree without recovery.
 
-## Path-Guided Tree Construction
-
-![Path-guided tree construction](assets/retree_path_guided_tree.png)
-
-The tree builder keeps DDTree's fixed-budget verification interface, but changes
-node priority by combining draft rank with a local continuity bonus from the
-visible request prefix. The rank gate keeps this bonus conservative by applying
-it only to high-ranked draft candidates.
-
 ## Results
 
 The main low-budget comparison uses a 16-node tree budget, block size 16, a
@@ -60,7 +45,7 @@ The main low-budget comparison uses a 16-node tree budget, block size 16, a
 means over GSM8K, MATH-500, AIME25, HumanEval, MBPP, LiveCodeBench, and
 MT-Bench.
 
-![Main low-budget results](assets/retree_main_results_table.png)
+![Main low-budget results](assets/results.png)
 
 Full summary files are in `assets/main_results_low_budget.csv` and
 `assets/qwen3_4b_budget_sweep.csv`.

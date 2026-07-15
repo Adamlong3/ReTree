@@ -555,7 +555,7 @@ def build_ddtree_tree(
       DDTREE_TREE_STRATEGY=ngram              full online n-gram, beta=0.15 best in tb64 runs
       DDTREE_TREE_STRATEGY=rank_gated_ngram   n-gram only for ranks <= DDTREE_NGRAM_RANK_CAP
 
-    Recommended current best for CSD integration:
+    Recommended current best for ReTree recovery integration:
       DDTREE_TREE_STRATEGY=rank_gated_ngram
       DDTREE_NGRAM_BETA=0.15
       DDTREE_NGRAM_RANK_CAP=8

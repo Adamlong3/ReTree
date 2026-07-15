@@ -1,19 +1,19 @@
 run_group,tree_budget,dataset,samples,method,speedup,avg_accept_len,avg_output_tokens,accuracy_pct,recovered_tokens,note
 tb16_multitask,16,GSM8K,128,DFlash local,4.08,6.57,298.16,89.1,,local run; not used in README reference comparison
 tb16_multitask,16,GSM8K,128,Tree-only,5.15,7.44,299.99,89.8,,DDTree tree-only run
-tb16_multitask,16,GSM8K,128,ReTree,5.36,7.67,291.49,93.0,535,DDTree+CSD run with multitask OCM
+tb16_multitask,16,GSM8K,128,ReTree,5.36,7.67,291.49,93.0,535,ReTree run with multitask recovery memory
 tb16_multitask,16,MATH-500,128,DFlash local,4.83,7.88,767.40,76.6,,local run; not used in README reference comparison
 tb16_multitask,16,MATH-500,128,Tree-only,5.84,8.57,746.66,76.6,,DDTree tree-only run
-tb16_multitask,16,MATH-500,128,ReTree,5.99,8.78,771.57,76.6,841,DDTree+CSD run with multitask OCM
+tb16_multitask,16,MATH-500,128,ReTree,5.99,8.78,771.57,76.6,841,ReTree run with multitask recovery memory
 tb16_multitask,16,HumanEval,164,DFlash local,4.26,6.56,463.47,,,local run; not used in README reference comparison
 tb16_multitask,16,HumanEval,164,Tree-only,5.18,7.45,462.68,,,DDTree tree-only run
-tb16_multitask,16,HumanEval,164,ReTree,5.35,7.64,457.74,,912,DDTree+CSD run with multitask OCM
+tb16_multitask,16,HumanEval,164,ReTree,5.35,7.64,457.74,,912,ReTree run with multitask recovery memory
 tb16_multitask,16,MBPP,128,DFlash local,3.56,5.94,324.48,,,local run; not used in README reference comparison
 tb16_multitask,16,MBPP,128,Tree-only,4.58,6.77,330.41,,,DDTree tree-only run
-tb16_multitask,16,MBPP,128,ReTree,4.90,7.02,323.20,,509,DDTree+CSD run with multitask OCM
+tb16_multitask,16,MBPP,128,ReTree,4.90,7.02,323.20,,509,ReTree run with multitask recovery memory
 tb16_multitask,16,MT-Bench,80,DFlash local,2.23,4.26,503.51,,,local run; not used in README reference comparison
 tb16_multitask,16,MT-Bench,80,Tree-only,2.98,5.07,502.60,,,DDTree tree-only run
-tb16_multitask,16,MT-Bench,80,ReTree,3.01,5.16,495.19,,1047,DDTree+CSD run with multitask OCM
+tb16_multitask,16,MT-Bench,80,ReTree,3.01,5.16,495.19,,1047,ReTree run with multitask recovery memory
 tb32_final,32,GSM8K,128,DFlash local,4.06,6.57,298.16,89.1,,local SDPA/linear run
 tb32_final,32,GSM8K,128,Tree-only,5.12,8.00,300.38,89.8,,previous DDTree-style tree-only run
 tb32_final,32,GSM8K,128,ReTree,5.56,8.27,294.84,89.1,455,latest ReTree run

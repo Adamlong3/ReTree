@@ -37,11 +37,12 @@ In the benchmark logs, the full ReTree configuration is:
 
 ```bash
 DDTREE_TREE_STRATEGY=rank_gated_ngram
-python benchmark.py --methods dflash,ddtree,ddtree_csd --csd-calibration-file ...
+python benchmark.py --methods dflash,ddtree,retree --recovery-memory-file ...
 ```
 
-The printed method name `DDTree+CSD` is the ReTree recovery path. Plain `DDTree`
-under `rank_gated_ngram` is the path-guided tree without recovery.
+The printed method name `ReTree` is the full path-guided tree plus
+target-gated recovery path. Plain `DDTree` under `rank_gated_ngram` is the
+path-guided tree without recovery.
 
 ## Path-Guided Tree Construction
 
@@ -59,22 +60,7 @@ The main low-budget comparison uses a 16-node tree budget, block size 16, a
 means over GSM8K, MATH-500, AIME25, HumanEval, MBPP, LiveCodeBench, and
 MT-Bench.
 
-![Low-budget benchmark](assets/retree_low_budget_benchmark.png)
-
-| Model | Temp. | Method | Avg. speedup | Avg. accepted length |
-| --- | ---: | --- | ---: | ---: |
-| Qwen3-4B | 0.0 | DFlash | 4.58x | 6.54 |
-| Qwen3-4B | 0.0 | DDTree (16) | 4.81x | 7.31 |
-| Qwen3-4B | 0.0 | ReTree (16) | **5.06x** | **7.86** |
-| Qwen3-8B | 0.0 | DFlash | 4.53x | 6.49 |
-| Qwen3-8B | 0.0 | DDTree (16) | 4.63x | 7.30 |
-| Qwen3-8B | 0.0 | ReTree (16) | **4.82x** | **7.77** |
-| Qwen3-4B | 1.0 | DFlash | 3.94x | 5.69 |
-| Qwen3-4B | 1.0 | DDTree (16) | 4.33x | 6.60 |
-| Qwen3-4B | 1.0 | ReTree (16) | **4.72x** | **7.38** |
-| Qwen3-8B | 1.0 | DFlash | 3.74x | 5.48 |
-| Qwen3-8B | 1.0 | DDTree (16) | 4.05x | 6.42 |
-| Qwen3-8B | 1.0 | ReTree (16) | **4.41x** | **7.13** |
+![Main low-budget results](assets/retree_main_results_table.png)
 
 Full summary files are in `assets/main_results_low_budget.csv` and
 `assets/qwen3_4b_budget_sweep.csv`.
@@ -126,19 +112,19 @@ torchrun --nproc_per_node=4 benchmark.py \
   --tree-budget 16 \
   --max-new-tokens 2048 \
   --temperature 0.0 \
-  --methods dflash,ddtree,ddtree_csd \
-  --csd-calibration-file ocm/merge/ocm_merged_16_8B.json \
-  --csd-freq-threshold 6 \
-  --csd-scg-threshold 0.01 \
-  --csd-record-top-k 8 \
-  --csd-rescue-top-k 8
+  --methods dflash,ddtree,retree \
+  --recovery-memory-file recovery_memory/merge/recovery_merged_16_8B.json \
+  --recovery-freq-threshold 6 \
+  --recovery-threshold 0.01 \
+  --recovery-record-top-k 8 \
+  --recovery-rescue-top-k 8
 ```
 
 Build a correction-memory file:
 
 ```bash
 DDTREE_TREE_STRATEGY=rank_gated_ngram \
-python csd_calibrate.py \
+python retree_calibrate.py \
   --model-name-or-path Qwen/Qwen3-8B \
   --draft-name-or-path z-lab/Qwen3-8B-DFlash-b16 \
   --block-size 16 \
@@ -148,7 +134,7 @@ python csd_calibrate.py \
   --max-new-tokens 512 \
   --temperature 0.6 \
   --record-top-k 8 \
-  --output-file ocm/new/ocm_gsm8k_8B_tb16.json
+  --output-file recovery_memory/new/recovery_gsm8k_8B_tb16.json
 ```
 
 The full experiment launcher is configurable by environment variables:
@@ -164,7 +150,8 @@ LOCAL_DATASETS_ROOT=/path/to/huggingface-cache \
 bash run_all.sh
 ```
 
-Generated logs, OCM files, and raw experiment notes are ignored by git.
+Generated logs, recovery-memory files, and raw experiment notes are ignored by
+git.
 
 ## Tree Strategy Knobs
 
@@ -182,11 +169,11 @@ Generated logs, OCM files, and raw experiment notes are ignored by git.
 ## Repository Layout
 
 - `benchmark.py`: distributed benchmark entry point.
-- `csd_calibrate.py`: offline correction-memory calibration.
+- `retree_calibrate.py`: offline recovery-memory calibration.
 - `ddtree.py`: tree construction, one-pass verification, and cache compaction.
-- `ddtree_csd.py`: ReTree decoding path with target-gated sibling recovery.
+- `retree.py`: ReTree decoding path with target-gated sibling recovery.
 - `dflash.py`: linear DFlash speculative decoding baseline.
-- `model/csd.py`: online correction memory and semantic consistency gate.
+- `model/recovery.py`: recovery memory and target-logit consistency gate.
 - `model/dflash.py`: DFlash draft model implementation.
 - `run_all.sh`: full calibration, merge, benchmark, and log-summary pipeline.
 

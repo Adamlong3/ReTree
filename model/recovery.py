@@ -6,7 +6,7 @@ import json
 import os
 
 
-class OnlineCorrectionMemory:
+class RecoveryMemory:
     def __init__(self, freq_threshold: int = 6):
         self.freq_threshold = freq_threshold
         self._table: dict[tuple[int, int], int] = defaultdict(int)
@@ -50,10 +50,10 @@ class OnlineCorrectionMemory:
             self._table[(int(parts[0]), int(parts[1]))] = int(v)
 
     @staticmethod
-    def from_file(path: str, freq_threshold: int = 6) -> "OnlineCorrectionMemory":
-        ocm = OnlineCorrectionMemory(freq_threshold=freq_threshold)
-        ocm.load(path)
-        return ocm
+    def from_file(path: str, freq_threshold: int = 6) -> "RecoveryMemory":
+        memory = RecoveryMemory(freq_threshold=freq_threshold)
+        memory.load(path)
+        return memory
 
 
 def token_pair_has_stop(
@@ -107,17 +107,17 @@ def semantic_consistency_gate(
     return bool((logit_draft - logit_top >= math.log(threshold)).item())
 
 
-def csd_verify_block(
+def recovery_verify_block(
     block_output_ids: torch.Tensor,
     target_logits: torch.Tensor,
     temperature: float,
-    ocm: Optional[OnlineCorrectionMemory],
+    recovery_memory: Optional[RecoveryMemory],
     scg_threshold: float = 0.01,
     stop_token_ids: set[int] | None = None,
 ) -> tuple[int, torch.Tensor, list[bool]]:
     """
-    Linear CSD verifier for normal block speculative decoding.
-    DDTree uses follow_verified_tree_csd() in ddtree_csd.py instead.
+    Linear recovery verifier for normal block speculative decoding.
+    ReTree uses follow_verified_tree_with_recovery() in retree.py instead.
     """
     block_size = block_output_ids.shape[1] - 1
 
@@ -144,14 +144,18 @@ def csd_verify_block(
             rescued_flags.append(False)
             continue
 
-        # Stop-token-safe CSD:
+        # Stop-token-safe recovery:
         # Do not record or rescue either direction:
         #   X -> EOS
         #   EOS -> X
         if token_pair_has_stop(draft_tok, target_tok, stop_token_ids):
             break
 
-        is_freq = ocm.is_frequent(draft_tok, target_tok) if ocm is not None else False
+        is_freq = (
+            recovery_memory.is_frequent(draft_tok, target_tok)
+            if recovery_memory is not None
+            else False
+        )
 
         is_safe = semantic_consistency_gate(
             target_logits[0],
@@ -163,8 +167,8 @@ def csd_verify_block(
 
         # Frequency is checked before update.
         # This prevents the current mismatch from immediately rescuing itself.
-        if ocm is not None:
-            ocm.update(draft_tok, target_tok)
+        if recovery_memory is not None:
+            recovery_memory.update(draft_tok, target_tok)
 
         if is_freq and is_safe:
             accepted_count += 1

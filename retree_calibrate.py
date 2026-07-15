@@ -13,7 +13,7 @@ from model import (
     extract_context_feature,
     load_and_process_dataset,
 )
-from model.csd import OnlineCorrectionMemory, token_pair_has_stop
+from model.recovery import RecoveryMemory, token_pair_has_stop
 from dflash import cuda_time
 from ddtree import (
     build_ddtree_tree,
@@ -47,14 +47,14 @@ def rank_children_by_target_logits(
 
 
 @torch.inference_mode()
-def calibrate_ocm_ddtree(
+def calibrate_retree_recovery(
     model: DFlashDraftModel,
     target: AutoModelForCausalLM,
     input_ids: torch.Tensor,
     mask_token_id: int,
     max_new_tokens: int,
     block_size: int,
-    ocm: OnlineCorrectionMemory,
+    recovery_memory: RecoveryMemory,
     tree_budget: int,
     temperature: float = 0.6,
     record_top_k: int = 8,
@@ -193,8 +193,9 @@ def calibrate_ocm_ddtree(
                 break
 
             # Do not record divergence pairs whose target token is EOS / stop token.
-            # Otherwise OCM will learn high-frequency pairs like "\n\n" -> "<|im_end|>",
-            # which can later make CSD override the target's stop decision.
+            # Otherwise recovery memory can learn high-frequency pairs such as
+            # "\n\n" -> "<|im_end|>", which may later override the target's
+            # stop decision.
             target_tok = int(next_token)
 
             # Stop-token-safe calibration:
@@ -208,7 +209,7 @@ def calibrate_ocm_ddtree(
                 position=current_index,
             )
 
-            # Record only top-k non-stop alternatives to avoid OCM pollution.
+            # Record only top-k non-stop alternatives to avoid memory pollution.
             recorded = 0
             for child_tok in ranked_child_tokens:
                 child_tok = int(child_tok)
@@ -224,7 +225,7 @@ def calibrate_ocm_ddtree(
                 if token_pair_has_stop(child_tok, target_tok, stop_token_ids):
                     continue
 
-                ocm.update(child_tok, target_tok)
+                recovery_memory.update(child_tok, target_tok)
                 divergence_count += 1
                 recorded += 1
 
@@ -330,7 +331,7 @@ def main() -> None:
     if len(dataset) > args.max_samples:
         dataset = dataset.shuffle(seed=0).select(range(args.max_samples))
 
-    ocm = OnlineCorrectionMemory(freq_threshold=0)
+    recovery_memory = RecoveryMemory(freq_threshold=0)
 
     stop_token_ids = (
         {int(tokenizer.eos_token_id)} if tokenizer.eos_token_id is not None else None
@@ -338,7 +339,7 @@ def main() -> None:
     print(f"Calibration stop_token_ids={stop_token_ids}")
 
     total_divergences = 0
-    for idx in tqdm(range(len(dataset)), desc="Calibrating DDTree OCM"):
+    for idx in tqdm(range(len(dataset)), desc="Calibrating ReTree recovery memory"):
         instance = dataset[idx]
         messages = [{"role": "user", "content": instance["turns"][0]}]
         input_text = tokenizer.apply_chat_template(
@@ -349,14 +350,14 @@ def main() -> None:
         )
         input_ids = tokenizer.encode(input_text, return_tensors="pt").to(device)
 
-        div_count = calibrate_ocm_ddtree(
+        div_count = calibrate_retree_recovery(
             model=draft_model,
             target=target,
             input_ids=input_ids,
             mask_token_id=draft_model.mask_token_id,
             max_new_tokens=args.max_new_tokens,
             block_size=args.block_size,
-            ocm=ocm,
+            recovery_memory=recovery_memory,
             tree_budget=args.tree_budget,
             temperature=args.temperature,
             record_top_k=args.record_top_k,
@@ -365,19 +366,19 @@ def main() -> None:
         total_divergences += div_count
 
     if args.output_file is None:
-        output_file = f"logs/ocm_ddtree_tb{args.tree_budget}_{args.dataset}_{args.max_samples}samples.json"
+        output_file = f"logs/recovery_tb{args.tree_budget}_{args.dataset}_{args.max_samples}samples.json"
     else:
         output_file = args.output_file
 
-    ocm.save(output_file)
+    recovery_memory.save(output_file)
     print(f"\n{'='*50}")
-    print(f"DDTree OCM Calibration Complete!")
+    print("ReTree recovery-memory calibration complete!")
     print(f"Tree budget: {args.tree_budget}")
     print(f"Total divergences recorded: {total_divergences}")
-    print(f"OCM unique pairs: {ocm.total_pairs()}")
-    print(f"OCM total rejections: {ocm.total_rejections()}")
-    print(f"OCM saved to: {output_file}")
-    top10 = ocm.top_k_pairs(10)
+    print(f"Recovery-memory unique pairs: {recovery_memory.total_pairs()}")
+    print(f"Recovery-memory total rejections: {recovery_memory.total_rejections()}")
+    print(f"Recovery memory saved to: {output_file}")
+    top10 = recovery_memory.top_k_pairs(10)
     print(f"Top-10 most frequent divergence pairs:")
     for (d_tok, t_tok), freq in top10:
         d_str = tokenizer.decode([d_tok])

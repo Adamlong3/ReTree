@@ -5,8 +5,8 @@ import torch
 from transformers import AutoModelForCausalLM, DynamicCache
 
 from model import DFlashDraftModel, sample, extract_context_feature
-from model.csd import (
-    OnlineCorrectionMemory,
+from model.recovery import (
+    RecoveryMemory,
     semantic_consistency_gate,
     token_pair_has_stop,
 )
@@ -54,11 +54,11 @@ def _rank_children_by_target_logits(
     return ranked
 
 
-def follow_verified_tree_csd(
+def follow_verified_tree_with_recovery(
     child_maps: list[dict[int, int]],
     posterior: torch.Tensor,
     target_logits: torch.Tensor,
-    ocm: OnlineCorrectionMemory,
+    recovery_memory: RecoveryMemory,
     scg_threshold: float = 0.01,
     online_update: bool = False,
     record_top_k: int = 8,
@@ -66,14 +66,14 @@ def follow_verified_tree_csd(
     disallow_rescue_target_ids: set[int] | None = None,
 ) -> tuple[list[int], int, int]:
     """
-    DDTree + CSD verifier.
+    ReTree verifier with target-gated sibling recovery.
 
     1. If target posterior token exists in current node's children:
            exact accept.
     2. Else:
-           try CSD rescue.
+           try sibling recovery.
            Candidate child must satisfy:
-               OCM[(child_token, target_token)] >= lambda
+               recovery_memory[(child_token, target_token)] >= lambda
                and SCG(child_token, target_token) passes.
 
     Default mode is offline-only:
@@ -130,16 +130,16 @@ def follow_verified_tree_csd(
             child_tok = int(child_tok)
 
             # Stop-token-safe frequency check:
-            # Never allow CSD pair involving EOS / stop token.
+            # Never allow a recovery pair involving EOS / stop token.
             if token_pair_has_stop(child_tok, target_tok, disallow_rescue_target_ids):
                 frequent_before_update[child_tok] = False
             else:
-                frequent_before_update[child_tok] = ocm.is_frequent(
+                frequent_before_update[child_tok] = recovery_memory.is_frequent(
                     child_tok, target_tok
                 )
 
-        # 5. Optional online OCM update.
-        #    Only record top-k non-stop children to avoid polluting OCM.
+        # 5. Optional online recovery-memory update.
+        #    Only record top-k non-stop children to avoid polluting memory.
         if online_update and record_top_k > 0:
             recorded = 0
 
@@ -155,13 +155,13 @@ def follow_verified_tree_csd(
                 ):
                     continue
 
-                ocm.update(child_tok, target_tok)
+                recovery_memory.update(child_tok, target_tok)
                 recorded += 1
 
                 if recorded >= record_top_k:
                     break
 
-        # 6. CSD rescue.
+        # 6. Target-gated sibling recovery.
         rescued = False
 
         for child_tok, child_idx in rescue_candidates:
@@ -202,7 +202,7 @@ def follow_verified_tree_csd(
 
 
 @torch.inference_mode()
-def ddtree_csd_generate(
+def retree_generate(
     model: DFlashDraftModel,
     target: AutoModelForCausalLM,
     input_ids: torch.Tensor,
@@ -212,11 +212,11 @@ def ddtree_csd_generate(
     stop_token_ids: list[int],
     temperature: float = 0.0,
     tree_budget: int | None = None,
-    ocm: OnlineCorrectionMemory | None = None,
+    recovery_memory: RecoveryMemory | None = None,
     scg_threshold: float = 0.01,
-    csd_online_update: bool = False,
-    csd_record_top_k: int = 8,
-    csd_rescue_top_k: int = 16,
+    recovery_online_update: bool = False,
+    recovery_record_top_k: int = 8,
+    recovery_rescue_top_k: int = 16,
 ) -> SimpleNamespace:
     if block_size <= 1:
         return dflash_generate(
@@ -385,16 +385,20 @@ def ddtree_csd_generate(
         commit_stage_start = cuda_time()
         posterior = sample(output.logits, temperature)
 
-        if ocm is not None:
-            accepted_indices, next_token, num_rescued = follow_verified_tree_csd(
+        if recovery_memory is not None:
+            (
+                accepted_indices,
+                next_token,
+                num_rescued,
+            ) = follow_verified_tree_with_recovery(
                 child_maps=child_maps,
                 posterior=posterior,
                 target_logits=output.logits,
-                ocm=ocm,
+                recovery_memory=recovery_memory,
                 scg_threshold=scg_threshold,
-                online_update=csd_online_update,
-                record_top_k=csd_record_top_k,
-                rescue_top_k=csd_rescue_top_k,
+                online_update=recovery_online_update,
+                record_top_k=recovery_record_top_k,
+                rescue_top_k=recovery_rescue_top_k,
                 disallow_rescue_target_ids=disallow_rescue_target_ids,
             )
             total_rescued += num_rescued

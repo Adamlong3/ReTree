@@ -1,7 +1,7 @@
 __pycache__/
 *.py[cod]
 logs/
-ocm/
+recovery_memory/
 
 # Runtime and experiment output
 *.log

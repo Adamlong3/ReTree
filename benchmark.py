@@ -14,8 +14,8 @@ import distributed as dist
 from model import DFlashDraftModel, sample, load_and_process_dataset
 from dflash import dflash_generate
 from ddtree import ddtree_generate, maybe_enable_cpp_compact
-from ddtree_csd import ddtree_csd_generate
-from model.csd import OnlineCorrectionMemory
+from retree import retree_generate
+from model.recovery import RecoveryMemory
 
 
 def extract_boxed_answer(text: str) -> str | None:
@@ -123,11 +123,11 @@ def attach_ref_answer(dataset, dataset_name: str):
     return dataset
 
 
-ALL_METHODS = ["dflash", "ddtree", "ddtree_csd"]
+ALL_METHODS = ["dflash", "ddtree", "retree"]
 METHOD_LABELS = {
     "dflash": "DFlash (linear SD)",
     "ddtree": "DDTree",
-    "ddtree_csd": "DDTree+CSD",
+    "retree": "ReTree",
 }
 
 
@@ -144,25 +144,55 @@ def main() -> None:
     parser.add_argument(
         "--methods",
         type=str,
-        default="dflash,ddtree,ddtree_csd",
-        help="Comma-separated list of methods to benchmark: dflash,ddtree,ddtree_csd",
+        default="dflash,ddtree,retree",
+        help="Comma-separated list of methods to benchmark: dflash,ddtree,retree",
     )
-    parser.add_argument("--csd-freq-threshold", type=int, default=6)
-    parser.add_argument("--csd-scg-threshold", type=float, default=0.01)
-    parser.add_argument("--csd-calibration-file", type=str, default=None)
+    parser.add_argument(
+        "--recovery-freq-threshold",
+        dest="recovery_freq_threshold",
+        type=int,
+        default=6,
+    )
+    parser.add_argument(
+        "--recovery-threshold",
+        dest="recovery_threshold",
+        type=float,
+        default=0.01,
+    )
+    parser.add_argument(
+        "--recovery-memory-file",
+        dest="recovery_memory_file",
+        type=str,
+        default=None,
+    )
     parser.add_argument("--flash-attn", action="store_true")
     parser.add_argument("--disable-cpp-compact-cache", action="store_true")
-    parser.add_argument("--csd-online-update", action="store_true")
-    parser.add_argument("--csd-record-top-k", type=int, default=8)
-    parser.add_argument("--csd-rescue-top-k", type=int, default=16)
+    parser.add_argument(
+        "--recovery-online-update",
+        dest="recovery_online_update",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--recovery-record-top-k",
+        dest="recovery_record_top_k",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
+        "--recovery-rescue-top-k",
+        dest="recovery_rescue_top_k",
+        type=int,
+        default=16,
+    )
     args = parser.parse_args()
 
     active_methods = [m.strip() for m in args.methods.split(",")]
+    active_methods = list(dict.fromkeys(m for m in active_methods if m))
     for m in active_methods:
         if m not in ALL_METHODS:
             raise ValueError(f"Unknown method '{m}'. Choose from: {ALL_METHODS}")
-    if "ddtree_csd" in active_methods and "ddtree" not in active_methods:
-        active_methods.insert(active_methods.index("ddtree_csd"), "ddtree")
+    if "retree" in active_methods and "ddtree" not in active_methods:
+        active_methods.insert(active_methods.index("retree"), "ddtree")
 
     random.seed(0)
     np.random.seed(0)
@@ -176,7 +206,7 @@ def main() -> None:
     device = torch.device(f"cuda:{dist.local_rank()}")
     maybe_enable_cpp_compact(not args.disable_cpp_compact_cache)
 
-    need_tree = any(m in active_methods for m in ("ddtree", "ddtree_csd"))
+    need_tree = any(m in active_methods for m in ("ddtree", "retree"))
     target_attn_implementation = "sdpa"
     draft_attn_implementation = "sdpa"
 
@@ -221,28 +251,34 @@ def main() -> None:
         args.block_size if args.block_size is not None else draft_model.block_size
     )
 
-    need_csd = "ddtree_csd" in active_methods
-    ocm = None
-    if need_csd:
-        if args.csd_calibration_file is not None:
-            ocm = OnlineCorrectionMemory.from_file(
-                args.csd_calibration_file, freq_threshold=args.csd_freq_threshold
+    need_retree = "retree" in active_methods
+    recovery_memory = None
+    if need_retree:
+        if args.recovery_memory_file is not None:
+            recovery_memory = RecoveryMemory.from_file(
+                args.recovery_memory_file,
+                freq_threshold=args.recovery_freq_threshold,
             )
             if dist.is_main():
-                total_pairs = ocm.total_pairs()
-                total_rej = ocm.total_rejections()
-                top5 = ocm.top_k_pairs(5)
-                print(f"CSD: Loaded OCM from {args.csd_calibration_file}")
-                print(f"CSD: Total pairs: {total_pairs}, Total rejections: {total_rej}")
-                print(f"CSD: Top-5 pairs: {top5}")
-                print(f"CSD: SCG threshold tau={args.csd_scg_threshold}")
+                total_pairs = recovery_memory.total_pairs()
+                total_rej = recovery_memory.total_rejections()
+                top5 = recovery_memory.top_k_pairs(5)
+                print(f"Recovery: loaded memory from {args.recovery_memory_file}")
+                print(
+                    f"Recovery: total pairs={total_pairs}, total rejections={total_rej}"
+                )
+                print(f"Recovery: top-5 pairs={top5}")
+                print(f"Recovery: logit threshold tau={args.recovery_threshold}")
         else:
-            ocm = OnlineCorrectionMemory(freq_threshold=args.csd_freq_threshold)
+            recovery_memory = RecoveryMemory(
+                freq_threshold=args.recovery_freq_threshold
+            )
             if dist.is_main():
                 print(
-                    f"CSD: Starting with empty OCM (online mode, lambda={args.csd_freq_threshold})"
+                    "Recovery: starting with empty memory "
+                    f"(online mode, lambda={args.recovery_freq_threshold})"
                 )
-                print(f"CSD: SCG threshold tau={args.csd_scg_threshold}")
+                print(f"Recovery: logit threshold tau={args.recovery_threshold}")
 
     if dist.is_main():
         print(f"Active methods: {[METHOD_LABELS[m] for m in active_methods]}")
@@ -317,8 +353,8 @@ def main() -> None:
             stop_token_ids=[tokenizer.eos_token_id],
             temperature=args.temperature,
         )
-    if need_csd:
-        _ = ddtree_csd_generate(
+    if need_retree:
+        _ = retree_generate(
             model=draft_model,
             target=target,
             input_ids=warmup_input_ids,
@@ -328,11 +364,11 @@ def main() -> None:
             tree_budget=args.tree_budget,
             stop_token_ids=[tokenizer.eos_token_id],
             temperature=args.temperature,
-            ocm=ocm,
-            scg_threshold=args.csd_scg_threshold,
-            csd_online_update=False,  # never update OCM during warmup
-            csd_record_top_k=args.csd_record_top_k,
-            csd_rescue_top_k=args.csd_rescue_top_k,
+            recovery_memory=recovery_memory,
+            scg_threshold=args.recovery_threshold,
+            recovery_online_update=False,  # never update memory during warmup
+            recovery_record_top_k=args.recovery_record_top_k,
+            recovery_rescue_top_k=args.recovery_rescue_top_k,
         )
 
     responses = []
@@ -391,8 +427,8 @@ def main() -> None:
                     temperature=args.temperature,
                 )
 
-            if need_csd:
-                response["ddtree_csd"] = ddtree_csd_generate(
+            if need_retree:
+                response["retree"] = retree_generate(
                     model=draft_model,
                     target=target,
                     input_ids=input_ids,
@@ -402,11 +438,11 @@ def main() -> None:
                     tree_budget=args.tree_budget,
                     stop_token_ids=[tokenizer.eos_token_id],
                     temperature=args.temperature,
-                    ocm=ocm,
-                    scg_threshold=args.csd_scg_threshold,
-                    csd_online_update=args.csd_online_update,
-                    csd_record_top_k=args.csd_record_top_k,
-                    csd_rescue_top_k=args.csd_rescue_top_k,
+                    recovery_memory=recovery_memory,
+                    scg_threshold=args.recovery_threshold,
+                    recovery_online_update=args.recovery_online_update,
+                    recovery_record_top_k=args.recovery_record_top_k,
+                    recovery_rescue_top_k=args.recovery_rescue_top_k,
                 )
 
             for key in active_methods:
@@ -486,27 +522,34 @@ def main() -> None:
 
     total_requests = len(responses)
 
-    if need_csd:
-        total_rescued = sum(r["ddtree_csd"].total_rescued for r in responses)
-        print(f"CSD Total Rescued Tokens: {total_rescued}")
+    if need_retree:
+        total_rescued = sum(r["retree"].total_rescued for r in responses)
+        print(f"Recovery Total Rescued Tokens: {total_rescued}")
 
-    if ocm is not None:
-        print(f"CSD OCM Total Pairs: {ocm.total_pairs()}")
-        print(f"CSD OCM Total Rejections Recorded: {ocm.total_rejections()}")
-        top10 = ocm.top_k_pairs(10)
-        print(f"CSD OCM Top-10 pairs: {top10}")
+    if recovery_memory is not None:
+        print(f"Recovery Memory Total Pairs: {recovery_memory.total_pairs()}")
+        print(
+            "Recovery Memory Total Rejections Recorded: "
+            f"{recovery_memory.total_rejections()}"
+        )
+        top10 = recovery_memory.top_k_pairs(10)
+        print(f"Recovery Memory Top-10 pairs: {top10}")
 
-        if args.csd_online_update:
-            ocm_path = f"logs/ocm_{args.dataset}_lambda{args.csd_freq_threshold}_tau{args.csd_scg_threshold}_online.json"
-            ocm.save(ocm_path)
-            print(f"CSD OCM saved to {ocm_path}")
+        if args.recovery_online_update:
+            memory_path = (
+                f"logs/recovery_{args.dataset}"
+                f"_lambda{args.recovery_freq_threshold}"
+                f"_tau{args.recovery_threshold}_online.json"
+            )
+            recovery_memory.save(memory_path)
+            print(f"Recovery memory saved to {memory_path}")
         else:
-            print("CSD OCM not saved because csd_online_update=False.")
+            print("Recovery memory not saved because recovery_online_update=False.")
 
     if dist.is_main():
-        print(f"CSD online update: {args.csd_online_update}")
-        print(f"CSD record_top_k: {args.csd_record_top_k}")
-        print(f"CSD rescue_top_k: {args.csd_rescue_top_k}")
+        print(f"Recovery online update: {args.recovery_online_update}")
+        print(f"Recovery record_top_k: {args.recovery_record_top_k}")
+        print(f"Recovery rescue_top_k: {args.recovery_rescue_top_k}")
 
     print(f"{'='*60}")
 

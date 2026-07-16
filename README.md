@@ -40,10 +40,10 @@ path-guided tree without recovery.
 
 ## Results
 
-The representative low-budget result below is the Qwen3-4B,
-temperature-0.0 comparison reported in the paper. All tree methods use a
-16-node budget, DFlash uses block size 16, and evaluation covers GSM8K,
-MATH-500, AIME25, HumanEval, MBPP, LiveCodeBench, and MT-Bench.
+The table below reproduces Table 1 from the paper. It reports Qwen3-4B and
+Qwen3-8B results at temperatures 0.0 and 1.0 over GSM8K, MATH-500, AIME25,
+HumanEval, MBPP, LiveCodeBench, and MT-Bench. All tree methods use a 16-node
+budget, and DFlash uses block size 16.
 
 ![Main low-budget results](assets/results.png)
 

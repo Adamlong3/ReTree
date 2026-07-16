@@ -47,10 +47,6 @@ budget, and DFlash uses block size 16.
 
 ![Main low-budget results](assets/results.png)
 
-The full Qwen3-4B/Qwen3-8B summary and budget-sweep values are in
-`assets/main_results_low_budget.csv` and
-`assets/qwen3_4b_budget_sweep.csv`, respectively.
-
 ## Budget Sweep
 
 ![Budget sweep](assets/retree_budget_sweep.png)
@@ -58,6 +54,8 @@ The full Qwen3-4B/Qwen3-8B summary and budget-sweep values are in
 The Qwen3-4B sweep compares DDTree, DominoTree, and ReTree over tree budgets
 16, 32, 64, 128, and 256. ReTree improves throughput in the low-budget regime
 while keeping construction latency close to DDTree.
+
+Full numeric values are in `assets/qwen3_4b_budget_sweep.csv`.
 
 ## Recovery Statistics
 

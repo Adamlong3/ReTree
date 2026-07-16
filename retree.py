@@ -7,7 +7,7 @@ from transformers import AutoModelForCausalLM, DynamicCache
 from model import DFlashDraftModel, sample, extract_context_feature
 from model.recovery import (
     RecoveryMemory,
-    semantic_consistency_gate,
+    target_logit_consistency_gate,
     token_pair_has_stop,
 )
 from dflash import dflash_generate, cuda_time, empty_stage_times
@@ -59,7 +59,7 @@ def follow_verified_tree_with_recovery(
     posterior: torch.Tensor,
     target_logits: torch.Tensor,
     recovery_memory: RecoveryMemory,
-    scg_threshold: float = 0.01,
+    gate_threshold: float = 0.01,
     online_update: bool = False,
     record_top_k: int = 8,
     rescue_top_k: int = 16,
@@ -74,7 +74,7 @@ def follow_verified_tree_with_recovery(
            try sibling recovery.
            Candidate child must satisfy:
                recovery_memory[(child_token, target_token)] >= lambda
-               and SCG(child_token, target_token) passes.
+               and the target-logit consistency gate passes.
 
     Default mode is offline-only:
         online_update=False
@@ -177,12 +177,12 @@ def follow_verified_tree_with_recovery(
             if not frequent_before_update.get(child_tok, False):
                 continue
 
-            is_safe = semantic_consistency_gate(
+            is_safe = target_logit_consistency_gate(
                 target_logits=logits_2d,
                 draft_token_id=child_tok,
                 target_top_token_id=target_tok,
                 position=current_index,
-                threshold=scg_threshold,
+                threshold=gate_threshold,
             )
 
             if not is_safe:
@@ -213,7 +213,7 @@ def retree_generate(
     temperature: float = 0.0,
     tree_budget: int | None = None,
     recovery_memory: RecoveryMemory | None = None,
-    scg_threshold: float = 0.01,
+    gate_threshold: float = 0.01,
     recovery_online_update: bool = False,
     recovery_record_top_k: int = 8,
     recovery_rescue_top_k: int = 16,
@@ -395,7 +395,7 @@ def retree_generate(
                 posterior=posterior,
                 target_logits=output.logits,
                 recovery_memory=recovery_memory,
-                scg_threshold=scg_threshold,
+                gate_threshold=gate_threshold,
                 online_update=recovery_online_update,
                 record_top_k=recovery_record_top_k,
                 rescue_top_k=recovery_rescue_top_k,

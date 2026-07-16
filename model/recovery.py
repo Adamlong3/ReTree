@@ -1,5 +1,4 @@
 from collections import defaultdict
-from typing import Optional
 import math
 import torch
 import json
@@ -79,7 +78,7 @@ def token_pair_has_stop(
     return draft_token in stop_token_ids or target_token in stop_token_ids
 
 
-def semantic_consistency_gate(
+def target_logit_consistency_gate(
     target_logits: torch.Tensor,
     draft_token_id: int,
     target_top_token_id: int,
@@ -87,7 +86,7 @@ def semantic_consistency_gate(
     threshold: float = 0.01,
 ) -> bool:
     """
-    SCG gate:
+    Target-logit consistency gate:
         exp(logit_draft - logit_target_top) >= threshold
 
     Equivalent:
@@ -105,75 +104,3 @@ def semantic_consistency_gate(
     logit_top = target_logits[position, int(target_top_token_id)]
 
     return bool((logit_draft - logit_top >= math.log(threshold)).item())
-
-
-def recovery_verify_block(
-    block_output_ids: torch.Tensor,
-    target_logits: torch.Tensor,
-    temperature: float,
-    recovery_memory: Optional[RecoveryMemory],
-    scg_threshold: float = 0.01,
-    stop_token_ids: set[int] | None = None,
-) -> tuple[int, torch.Tensor, list[bool]]:
-    """
-    Linear recovery verifier for normal block speculative decoding.
-    ReTree uses follow_verified_tree_with_recovery() in retree.py instead.
-    """
-    block_size = block_output_ids.shape[1] - 1
-
-    if temperature < 1e-5:
-        posterior = torch.argmax(target_logits, dim=-1)
-    else:
-        bsz, seq_len, vocab_size = target_logits.shape
-        logits_flat = target_logits.view(-1, vocab_size) / temperature
-        probs = torch.softmax(logits_flat, dim=-1)
-        posterior = torch.multinomial(probs, num_samples=1).view(bsz, seq_len)
-
-    draft_tokens = block_output_ids[0, 1:]
-    target_tokens = posterior[0, :-1]
-
-    accepted_count = 0
-    rescued_flags: list[bool] = []
-
-    for i in range(block_size):
-        draft_tok = int(draft_tokens[i].item())
-        target_tok = int(target_tokens[i].item())
-
-        if draft_tok == target_tok:
-            accepted_count += 1
-            rescued_flags.append(False)
-            continue
-
-        # Stop-token-safe recovery:
-        # Do not record or rescue either direction:
-        #   X -> EOS
-        #   EOS -> X
-        if token_pair_has_stop(draft_tok, target_tok, stop_token_ids):
-            break
-
-        is_freq = (
-            recovery_memory.is_frequent(draft_tok, target_tok)
-            if recovery_memory is not None
-            else False
-        )
-
-        is_safe = semantic_consistency_gate(
-            target_logits[0],
-            draft_token_id=draft_tok,
-            target_top_token_id=target_tok,
-            position=i,
-            threshold=scg_threshold,
-        )
-
-        # Frequency is checked before update.
-        # This prevents the current mismatch from immediately rescuing itself.
-        if recovery_memory is not None:
-            recovery_memory.update(draft_tok, target_tok)
-
-        if is_freq and is_safe:
-            accepted_count += 1
-            rescued_flags.append(True)
-        else:
-            break
-
-    return accepted_count, posterior, rescued_flags

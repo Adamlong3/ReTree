@@ -40,15 +40,16 @@ path-guided tree without recovery.
 
 ## Results
 
-The main low-budget comparison uses a 16-node tree budget, block size 16, a
-2048-token generation limit, and thinking disabled. Averages are arithmetic
-means over GSM8K, MATH-500, AIME25, HumanEval, MBPP, LiveCodeBench, and
-MT-Bench.
+The representative low-budget result below is the Qwen3-4B,
+temperature-0.0 comparison reported in the paper. All tree methods use a
+16-node budget, DFlash uses block size 16, and evaluation covers GSM8K,
+MATH-500, AIME25, HumanEval, MBPP, LiveCodeBench, and MT-Bench.
 
 ![Main low-budget results](assets/results.png)
 
-Full summary files are in `assets/main_results_low_budget.csv` and
-`assets/qwen3_4b_budget_sweep.csv`.
+The full Qwen3-4B/Qwen3-8B summary and budget-sweep values are in
+`assets/main_results_low_budget.csv` and
+`assets/qwen3_4b_budget_sweep.csv`, respectively.
 
 ## Budget Sweep
 
@@ -98,14 +99,14 @@ torchrun --nproc_per_node=4 benchmark.py \
   --max-new-tokens 2048 \
   --temperature 0.0 \
   --methods dflash,ddtree,retree \
-  --recovery-memory-file recovery_memory/merge/recovery_merged_16_8B.json \
+  --recovery-memory-file recovery_memory/alltask/8B/tb16/recovery_alltask_8B_tb16.json \
   --recovery-freq-threshold 6 \
   --recovery-threshold 0.01 \
   --recovery-record-top-k 8 \
   --recovery-rescue-top-k 8
 ```
 
-Build a correction-memory file:
+Build a task-level recovery-memory file:
 
 ```bash
 DDTREE_TREE_STRATEGY=rank_gated_ngram \
@@ -119,7 +120,7 @@ python retree_calibrate.py \
   --max-new-tokens 512 \
   --temperature 0.6 \
   --record-top-k 8 \
-  --output-file recovery_memory/new/recovery_gsm8k_8B_tb16.json
+  --output-file recovery_memory/calibration/8B/tb16_rankcap8/recovery_gsm8k_2000_8B_tb16.json
 ```
 
 The full experiment launcher is configurable by environment variables:
@@ -141,7 +142,7 @@ git.
 ## Tree Strategy Knobs
 
 - `DDTREE_TREE_STRATEGY=heap`: original DDTree heap construction.
-- `DDTREE_TREE_STRATEGY=ngram`: online n-gram bonus for all candidate ranks.
+- `DDTREE_TREE_STRATEGY=ngram`: request-local n-gram bonus for all candidate ranks.
 - `DDTREE_TREE_STRATEGY=rank_gated_ngram`: n-gram bonus only for top-ranked
   candidate tokens; this is the default ReTree tree-construction variant.
 - `DDTREE_NGRAM_BETA`: path-continuity bonus scale, default `0.15`.
@@ -160,7 +161,7 @@ git.
 - `dflash.py`: linear DFlash speculative decoding baseline.
 - `model/recovery.py`: recovery memory and target-logit consistency gate.
 - `model/dflash.py`: DFlash draft model implementation.
-- `run_all.sh`: full calibration, merge, benchmark, and log-summary pipeline.
+- `run_all.sh`: full calibration, all-task memory build, benchmark, and log-summary pipeline.
 
 ## Related Work
 

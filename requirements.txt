@@ -1,8 +1,5 @@
-torch
-transformers>=4.57.1
 datasets
+loguru
 numpy
 tqdm
-loguru
-typing-extensions
-accelerate
+transformers

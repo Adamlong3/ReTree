@@ -181,7 +181,6 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
     def __init__(self, config) -> None:
         super().__init__(config)
         self.config = config
-        self.num_recurrent_steps = getattr(config, "num_recurrent_steps", 1)
         self.layers = nn.ModuleList(
             [
                 Qwen3DFlashDecoderLayer(config, layer_idx)
@@ -224,25 +223,17 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
         target_hidden = self.hidden_norm(self.fc(target_hidden))
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-        original_seq_length = (
-            past_key_values.get_seq_length() if past_key_values is not None else 0
-        )
-
-        for step_idx in range(self.num_recurrent_steps):
-            if step_idx > 0 and past_key_values is not None:
-                past_key_values.crop(original_seq_length)
-
-            for layer in self.layers:
-                hidden_states = layer(
-                    hidden_states=hidden_states,
-                    target_hidden=target_hidden,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    past_key_value=past_key_values,
-                    use_cache=use_cache,
-                    position_embeddings=position_embeddings,
-                    **kwargs,
-                )
+        for layer in self.layers:
+            hidden_states = layer(
+                hidden_states=hidden_states,
+                target_hidden=target_hidden,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_value=past_key_values,
+                use_cache=use_cache,
+                position_embeddings=position_embeddings,
+                **kwargs,
+            )
 
         return self.norm(hidden_states)
 

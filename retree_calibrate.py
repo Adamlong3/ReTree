@@ -294,8 +294,6 @@ def main() -> None:
     draft_config = AutoConfig.from_pretrained(args.draft_name_or_path)
     if getattr(draft_config, "fusion_target_layers", None) is None:
         draft_config.fusion_target_layers = [1, 9, 17, 25, 33]
-    if getattr(draft_config, "num_recurrent_steps", None) is None:
-        draft_config.num_recurrent_steps = 1
 
     draft_model = (
         DFlashDraftModel.from_pretrained(

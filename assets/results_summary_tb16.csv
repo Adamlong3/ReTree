@@ -1,7 +1,0 @@
-dataset,samples,dflash_reference_speedup,retree_speedup,retree_vs_dflash_pct,dflash_avg_accept_len,retree_avg_accept_len,retree_avg_output_tokens,accuracy_pct,recovered_tokens
-GSM8K,128,5.20,5.36,3.1,6.57,7.67,291.49,93.0,535
-MATH-500,128,6.17,5.99,-2.9,7.88,8.78,771.57,76.6,841
-HumanEval,164,5.20,5.35,2.9,6.56,7.64,457.74,,912
-MBPP,128,4.75,4.90,3.2,5.94,7.02,323.20,,509
-MT-Bench,80,2.79,3.01,7.9,4.27,5.16,495.19,,1047
-Average,,4.82,4.92,2.1,6.24,7.25,,,3844

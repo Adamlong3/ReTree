@@ -233,8 +233,6 @@ def main() -> None:
     draft_config = AutoConfig.from_pretrained(args.draft_name_or_path)
     if getattr(draft_config, "fusion_target_layers", None) is None:
         draft_config.fusion_target_layers = [1, 9, 17, 25, 33]
-    if getattr(draft_config, "num_recurrent_steps", None) is None:
-        draft_config.num_recurrent_steps = 1
 
     draft_model = (
         DFlashDraftModel.from_pretrained(
@@ -365,7 +363,7 @@ def main() -> None:
             stop_token_ids=[tokenizer.eos_token_id],
             temperature=args.temperature,
             recovery_memory=recovery_memory,
-            scg_threshold=args.recovery_threshold,
+            gate_threshold=args.recovery_threshold,
             recovery_online_update=False,  # never update memory during warmup
             recovery_record_top_k=args.recovery_record_top_k,
             recovery_rescue_top_k=args.recovery_rescue_top_k,
@@ -439,7 +437,7 @@ def main() -> None:
                     stop_token_ids=[tokenizer.eos_token_id],
                     temperature=args.temperature,
                     recovery_memory=recovery_memory,
-                    scg_threshold=args.recovery_threshold,
+                    gate_threshold=args.recovery_threshold,
                     recovery_online_update=args.recovery_online_update,
                     recovery_record_top_k=args.recovery_record_top_k,
                     recovery_rescue_top_k=args.recovery_rescue_top_k,

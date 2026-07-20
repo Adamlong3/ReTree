@@ -60,9 +60,9 @@ def follow_verified_tree_with_recovery(
     target_logits: torch.Tensor,
     recovery_memory: RecoveryMemory,
     gate_threshold: float = 0.01,
-    online_update: bool = False,
+    online_update: bool = True,
     record_top_k: int = 8,
-    rescue_top_k: int = 16,
+    rescue_top_k: int = 8,
     disallow_rescue_target_ids: set[int] | None = None,
 ) -> tuple[list[int], int, int]:
     """
@@ -76,11 +76,8 @@ def follow_verified_tree_with_recovery(
                recovery_memory[(child_token, target_token)] >= lambda
                and the target-logit consistency gate passes.
 
-    Default mode is offline-only:
-        online_update=False
-
-    For offline+online ablation:
-        online_update=True
+    The paper configuration starts from a fixed offline prior and records
+    causal online events after snapshotting the current frequency gates.
     """
     posterior_tokens = posterior[0].tolist()
     logits_2d = target_logits[0]
@@ -124,42 +121,34 @@ def follow_verified_tree_with_recovery(
         # 4. Check frequency BEFORE optional online update.
         #    This avoids the current mismatch making itself immediately frequent.
         target_tok = int(next_token)
-        frequent_before_update = {}
+        candidate_pairs = []
 
         for child_tok, _ in rescue_candidates:
             child_tok = int(child_tok)
+            if not token_pair_has_stop(
+                child_tok, target_tok, disallow_rescue_target_ids
+            ):
+                candidate_pairs.append((child_tok, target_tok))
 
-            # Stop-token-safe frequency check:
-            # Never allow a recovery pair involving EOS / stop token.
-            if token_pair_has_stop(child_tok, target_tok, disallow_rescue_target_ids):
-                frequent_before_update[child_tok] = False
-            else:
-                frequent_before_update[child_tok] = recovery_memory.is_frequent(
-                    child_tok, target_tok
-                )
+        frequency_snapshot = recovery_memory.snapshot_frequencies(candidate_pairs)
+        frequent_before_update = {
+            child_tok: (
+                (child_tok, target_tok) in frequency_snapshot
+                and frequency_snapshot[(child_tok, target_tok)]
+                >= recovery_memory.freq_threshold
+            )
+            for child_tok, _ in rescue_candidates
+        }
 
         # 5. Optional online recovery-memory update.
         #    Only record top-k non-stop children to avoid polluting memory.
-        if online_update and record_top_k > 0:
-            recorded = 0
-
-            for child_tok, _ in ranked_children:
-                child_tok = int(child_tok)
-
-                # Stop-token-safe online update:
-                # Do not record either direction:
-                #   X -> EOS
-                #   EOS -> X
-                if token_pair_has_stop(
-                    child_tok, target_tok, disallow_rescue_target_ids
-                ):
-                    continue
-
-                recovery_memory.update(child_tok, target_tok)
-                recorded += 1
-
-                if recorded >= record_top_k:
-                    break
+        if online_update:
+            recovery_memory.record_online_divergences(
+                (child_tok for child_tok, _ in ranked_children),
+                target_token=target_tok,
+                top_k=record_top_k,
+                stop_token_ids=disallow_rescue_target_ids,
+            )
 
         # 6. Target-gated sibling recovery.
         rescued = False
@@ -214,9 +203,9 @@ def retree_generate(
     tree_budget: int | None = None,
     recovery_memory: RecoveryMemory | None = None,
     gate_threshold: float = 0.01,
-    recovery_online_update: bool = False,
+    recovery_online_update: bool = True,
     recovery_record_top_k: int = 8,
-    recovery_rescue_top_k: int = 16,
+    recovery_rescue_top_k: int = 8,
 ) -> SimpleNamespace:
     if block_size <= 1:
         return dflash_generate(

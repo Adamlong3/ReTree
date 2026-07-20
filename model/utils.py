@@ -1,6 +1,27 @@
-import torch
+import hashlib
+import re
 from typing import Optional
-from datasets import load_dataset, Features, Sequence, Value
+import unicodedata
+
+import torch
+from datasets import (
+    Features,
+    Sequence,
+    Value,
+    concatenate_datasets,
+    load_dataset,
+)
+
+
+MATH_CONFIGS = (
+    "algebra",
+    "counting_and_probability",
+    "geometry",
+    "intermediate_algebra",
+    "number_theory",
+    "prealgebra",
+    "precalculus",
+)
 
 
 def build_target_layer_ids(num_target_layers: int, num_draft_layers: int):
@@ -137,3 +158,85 @@ def load_and_process_dataset(data_name: str):
         )
 
     return dataset
+
+
+def load_calibration_dataset(data_name: str):
+    """Load a training-only source used to initialize recovery memory."""
+    math_prompt = (
+        "{problem}\nPlease reason step by step, and put your final answer "
+        "within \\boxed{{}}."
+    )
+
+    if data_name == "gsm8k_train":
+        dataset = load_dataset("openai/gsm8k", "main", split="train")
+        prompt_fmt = (
+            "{question}\nPlease reason step by step, and put your final answer "
+            "within \\boxed{{}}."
+        )
+        return dataset.map(
+            lambda row: {"turns": [prompt_fmt.format(**row)]},
+            remove_columns=dataset.column_names,
+        )
+
+    if data_name == "math_train":
+        parts = [
+            load_dataset("EleutherAI/hendrycks_math", config, split="train")
+            for config in MATH_CONFIGS
+        ]
+        dataset = concatenate_datasets(parts)
+        return dataset.map(
+            lambda row: {"turns": [math_prompt.format(**row)]},
+            remove_columns=dataset.column_names,
+        )
+
+    if data_name == "mbpp_train":
+        dataset = load_dataset(
+            "google-research-datasets/mbpp", "full", split="train"
+        )
+        return dataset.map(
+            lambda row: {"turns": [row["text"]]},
+            remove_columns=dataset.column_names,
+        )
+
+    if data_name == "cnn_dailymail_train":
+        dataset = load_dataset(
+            "abisee/cnn_dailymail", "3.0.0", split="train"
+        )
+        return dataset.map(
+            lambda row: {
+                "turns": [
+                    "Summarize the following news article:\n\n" + row["article"]
+                ]
+            },
+            remove_columns=dataset.column_names,
+        )
+
+    raise ValueError(
+        f"Unknown calibration dataset {data_name!r}. Choose from "
+        "gsm8k_train, math_train, mbpp_train, cnn_dailymail_train."
+    )
+
+
+def normalize_prompt_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(text))
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def prompt_hashes(turns: list[str] | tuple[str, ...] | str) -> set[str]:
+    """Hash individual turns and the ordered multi-turn prompt."""
+    if isinstance(turns, str):
+        turns = [turns]
+    normalized_turns = [normalize_prompt_text(turn) for turn in turns]
+    payloads = normalized_turns + ["\n<RETREE_TURN>\n".join(normalized_turns)]
+    return {
+        hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        for payload in payloads
+        if payload
+    }
+
+
+def collect_prompt_hashes(dataset) -> set[str]:
+    hashes: set[str] = set()
+    for row in dataset:
+        hashes.update(prompt_hashes(row["turns"]))
+    return hashes

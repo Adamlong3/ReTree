@@ -5,12 +5,12 @@ set -euo pipefail
 # Full ReTree experiment pipeline for Qwen3-4B / Qwen3-8B.
 #
 # For each model and tree budget, this script:
-#   1) calibrates task-level recovery memories with the path-guided tree;
-#   2) combines those task-level memories into one all-task memory;
+#   1) initializes task-domain recovery priors with the path-guided tree;
+#   2) combines those domain priors into one fixed evaluation prior;
 #   3) benchmarks the base DDTree verifier and the full ReTree configuration.
 #
-# Reported ReTree runs use offline recovery memory by default. Enable
-# BENCH_ONLINE_UPDATE=1 only for the online-update ablation.
+# Reported ReTree runs reload a fixed offline prior for each dataset and then
+# evolve an online delta causally. Set BENCH_ONLINE_UPDATE=0 for the ablation.
 # =============================================================================
 
 # -----------------------------
@@ -35,13 +35,14 @@ if [[ -n "${LOCAL_DATASETS_ROOT}" ]]; then
 fi
 
 RECOVERY_ROOT="${RECOVERY_ROOT:-${PROJECT_ROOT}/recovery_memory}"
-CALIB_ROOT="${CALIB_ROOT:-${RECOVERY_ROOT}/calibration}"
-ALLTASK_ROOT="${ALLTASK_ROOT:-${RECOVERY_ROOT}/alltask}"
+RECOVERY_PRIOR_TAG="${RECOVERY_PRIOR_TAG:-train_disjoint_v1}"
+CALIB_ROOT="${CALIB_ROOT:-${RECOVERY_ROOT}/calibration/${RECOVERY_PRIOR_TAG}}"
+ALLTASK_ROOT="${ALLTASK_ROOT:-${RECOVERY_ROOT}/alltask/${RECOVERY_PRIOR_TAG}}"
 RUN_ROOT="${RUN_ROOT:-${RECOVERY_ROOT}/run}"
-CALIB_LOG_ROOT="${CALIB_LOG_ROOT:-${RUN_ROOT}/calib_logs}"
-COMBINE_LOG_ROOT="${COMBINE_LOG_ROOT:-${RUN_ROOT}/combine_logs}"
-BENCH_LOG_ROOT="${BENCH_LOG_ROOT:-${RUN_ROOT}/bench_logs}"
-SUMMARY_ROOT="${SUMMARY_ROOT:-${RUN_ROOT}/summaries}"
+CALIB_LOG_ROOT="${CALIB_LOG_ROOT:-${RUN_ROOT}/calib_logs/${RECOVERY_PRIOR_TAG}}"
+COMBINE_LOG_ROOT="${COMBINE_LOG_ROOT:-${RUN_ROOT}/combine_logs/${RECOVERY_PRIOR_TAG}}"
+BENCH_LOG_ROOT="${BENCH_LOG_ROOT:-${RUN_ROOT}/bench_logs/${RECOVERY_PRIOR_TAG}}"
+SUMMARY_ROOT="${SUMMARY_ROOT:-${RUN_ROOT}/summaries/${RECOVERY_PRIOR_TAG}}"
 
 mkdir -p "${CALIB_ROOT}" "${ALLTASK_ROOT}" "${RUN_ROOT}" \
          "${CALIB_LOG_ROOT}" "${COMBINE_LOG_ROOT}" "${BENCH_LOG_ROOT}" \
@@ -66,18 +67,19 @@ TB_LIST="${TB_LIST:-16 32 64 128 256}"
 read -r -a TREE_BUDGETS <<< "${TB_LIST}"
 
 CALIB_TASKS=(
-  "gsm8k:2000"
-  "math500:500"
-  "humaneval:164"
-  "mbpp:374"
-  "mt-bench:80"
+  "gsm8k_train:2000"
+  "math_train:7500"
+  "mbpp_train:374"
+  "cnn_dailymail_train:2000"
 )
 
 BENCH_TASKS=(
   "gsm8k:128"
   "math500:128"
+  "aime25:30"
   "humaneval:164"
   "mbpp:128"
+  "livecodebench:128"
   "mt-bench:80"
 )
 
@@ -105,11 +107,12 @@ RECOVERY_FREQ_THRESHOLD="${RECOVERY_FREQ_THRESHOLD:-6}"
 RECOVERY_THRESHOLD="${RECOVERY_THRESHOLD:-0.01}"
 RECOVERY_RECORD_TOP_K="${RECOVERY_RECORD_TOP_K:-8}"
 RECOVERY_RESCUE_TOP_K="${RECOVERY_RESCUE_TOP_K:-8}"
+CALIB_DEDUPE_DATASETS="${CALIB_DEDUPE_DATASETS:-gsm8k,math500,aime25,humaneval,mbpp,livecodebench,mt-bench}"
 
 # -----------------------------
 # GPU / control config
 # -----------------------------
-CALIB_GPUS=( ${CALIB_GPUS:-0 1 2 3 4} )
+CALIB_GPUS=( ${CALIB_GPUS:-0 1 2 3} )
 BENCH_CUDA_VISIBLE_DEVICES="${BENCH_CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 MASTER_PORT_BASE="${MASTER_PORT_BASE:-31000}"
@@ -117,7 +120,7 @@ MASTER_PORT_BASE="${MASTER_PORT_BASE:-31000}"
 FORCE_RECALIB="${FORCE_RECALIB:-0}"
 FORCE_COMBINE="${FORCE_COMBINE:-0}"
 FORCE_BENCH="${FORCE_BENCH:-0}"
-BENCH_ONLINE_UPDATE="${BENCH_ONLINE_UPDATE:-0}"
+BENCH_ONLINE_UPDATE="${BENCH_ONLINE_UPDATE:-1}"
 
 # -----------------------------
 # Helpers
@@ -231,6 +234,7 @@ print_config() {
 PROJECT_ROOT                 = ${PROJECT_ROOT}
 LOCAL_DATASETS_ROOT          = ${LOCAL_DATASETS_ROOT}
 RECOVERY_ROOT                = ${RECOVERY_ROOT}
+RECOVERY_PRIOR_TAG           = ${RECOVERY_PRIOR_TAG}
 CALIB_ROOT                   = ${CALIB_ROOT}
 ALLTASK_ROOT                 = ${ALLTASK_ROOT}
 RUN_ROOT                     = ${RUN_ROOT}
@@ -252,6 +256,7 @@ RECOVERY_FREQ_THRESHOLD      = ${RECOVERY_FREQ_THRESHOLD}
 RECOVERY_THRESHOLD           = ${RECOVERY_THRESHOLD}
 RECOVERY_RECORD_TOP_K        = ${RECOVERY_RECORD_TOP_K}
 RECOVERY_RESCUE_TOP_K        = ${RECOVERY_RESCUE_TOP_K}
+CALIB_DEDUPE_DATASETS        = ${CALIB_DEDUPE_DATASETS}
 CALIB_GPUS                   = ${CALIB_GPUS[*]}
 BENCH_CUDA_VISIBLE_DEVICES   = ${BENCH_CUDA_VISIBLE_DEVICES}
 NPROC_PER_NODE               = ${NPROC_PER_NODE}
@@ -285,7 +290,7 @@ run_calibration_for_model_tb() {
 
   echo ""
   echo "################################################################################"
-  echo "# Calibrate ReTree recovery memory: model=${model_tag}, tb=${tb}"
+  echo "# Initialize ReTree recovery prior: model=${model_tag}, tb=${tb}"
   echo "################################################################################"
 
   local pids=()
@@ -329,6 +334,7 @@ run_calibration_for_model_tb() {
           --temperature "${CALIB_TEMPERATURE}" \
           --max-new-tokens "${MAX_NEW_TOKENS_CALIB}" \
           --record-top-k "${RECOVERY_RECORD_TOP_K}" \
+          --dedupe-against "${CALIB_DEDUPE_DATASETS}" \
           --output-file "${output_file}"
 
         validate_json "${output_file}" >/dev/null
@@ -388,7 +394,7 @@ run_calibration_for_model_tb() {
 }
 
 # -----------------------------
-# Combine task memories
+# Combine task-domain priors
 # -----------------------------
 combine_memories_for_model_tb() {
   local model_tag="$1"
@@ -442,8 +448,10 @@ for path in inputs:
         combined[str(k)] += int(v)
 
 out.parent.mkdir(parents=True, exist_ok=True)
-with open(out, "w") as f:
+tmp = out.with_name(out.name + ".tmp")
+with open(tmp, "w") as f:
     json.dump(dict(combined), f)
+tmp.replace(out)
 
 print(f"[DONE] saved all-task recovery memory: {out}")
 print(f"unique pairs: {len(combined)}")
@@ -512,6 +520,8 @@ run_benchmark_one() {
       )
       if [[ "${BENCH_ONLINE_UPDATE}" == "1" ]]; then
         recovery_args+=(--recovery-online-update)
+      else
+        recovery_args+=(--no-recovery-online-update)
       fi
       ;;
 
@@ -710,7 +720,7 @@ main() {
 ################################################################################
 # DONE
 ################################################################################
-Task-level recovery memories:
+Task-domain recovery priors:
   ${CALIB_ROOT}
 
 All-task recovery memories:

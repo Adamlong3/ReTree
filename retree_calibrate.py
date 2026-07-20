@@ -1,6 +1,5 @@
 import argparse
 import random
-import time
 
 import numpy as np
 import torch
@@ -8,13 +7,15 @@ from tqdm import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
 from model import (
+    collect_prompt_hashes,
     DFlashDraftModel,
-    sample,
     extract_context_feature,
+    load_calibration_dataset,
     load_and_process_dataset,
+    prompt_hashes,
+    sample,
 )
-from model.recovery import RecoveryMemory, token_pair_has_stop
-from dflash import cuda_time
+from model.recovery import RecoveryMemory
 from ddtree import (
     build_ddtree_tree,
     compile_ddtree_tree,
@@ -192,14 +193,13 @@ def calibrate_retree_recovery(
             if len(children) == 0:
                 break
 
-            # Do not record divergence pairs whose target token is EOS / stop token.
-            # Otherwise recovery memory can learn high-frequency pairs such as
-            # "\n\n" -> "<|im_end|>", which may later override the target's
-            # stop decision.
-            target_tok = int(next_token)
+            # Prior initialization records only an actual exact-walk stop.
+            if next_token in children:
+                current_index = children[next_token]
+                next_token = int(posterior_tokens[current_index])
+                continue
 
-            # Stop-token-safe calibration:
-            # If target wants EOS / stop token, do not record child -> stop pairs.
+            target_tok = int(next_token)
             if stop_token_ids is not None and target_tok in stop_token_ids:
                 break
 
@@ -209,35 +209,13 @@ def calibrate_retree_recovery(
                 position=current_index,
             )
 
-            # Record only top-k non-stop alternatives to avoid memory pollution.
-            recorded = 0
-            for child_tok in ranked_child_tokens:
-                child_tok = int(child_tok)
-
-                # If exact target child exists, do not record target itself as divergence.
-                if child_tok == target_tok:
-                    continue
-
-                # Stop-token-safe calibration:
-                # Do not record either direction:
-                #   X -> EOS
-                #   EOS -> X
-                if token_pair_has_stop(child_tok, target_tok, stop_token_ids):
-                    continue
-
-                recovery_memory.update(child_tok, target_tok)
-                divergence_count += 1
-                recorded += 1
-
-                if recorded >= record_top_k:
-                    break
-
-            # Follow exact path if possible; otherwise stop calibration for this round.
-            if next_token in children:
-                current_index = children[next_token]
-                next_token = int(posterior_tokens[current_index])
-            else:
-                break
+            divergence_count += recovery_memory.record_prior_divergences(
+                ranked_child_tokens,
+                target_token=target_tok,
+                top_k=record_top_k,
+                stop_token_ids=stop_token_ids,
+            )
+            break
 
         accepted_indices, next_token = follow_verified_tree(child_maps, posterior)
         accepted_index_tensor = torch.tensor(
@@ -267,12 +245,20 @@ def main() -> None:
     parser.add_argument("--draft-name-or-path", type=str, required=True)
     parser.add_argument("--block-size", type=int, default=16)
     parser.add_argument("--tree-budget", type=int, default=32)
-    parser.add_argument("--dataset", type=str, default="gsm8k")
+    parser.add_argument("--dataset", type=str, default="gsm8k_train")
     parser.add_argument("--max-samples", type=int, default=2000)
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--output-file", type=str, default=None)
     parser.add_argument("--record-top-k", type=int, default=8)
+    parser.add_argument(
+        "--dedupe-against",
+        type=str,
+        default=(
+            "gsm8k,math500,aime25,humaneval,mbpp,livecodebench,mt-bench"
+        ),
+        help="Comma-separated evaluation datasets excluded by normalized prompt hash.",
+    )
     args = parser.parse_args()
 
     random.seed(0)
@@ -325,9 +311,38 @@ def main() -> None:
         f"Using draft_model.mask_token_id={draft_model.mask_token_id}, target_vocab_size={vocab_size}"
     )
 
-    dataset = load_and_process_dataset(args.dataset)
+    dataset = load_calibration_dataset(args.dataset)
+
+    dedupe_datasets = [
+        name.strip() for name in args.dedupe_against.split(",") if name.strip()
+    ]
+    blocked_prompt_hashes: set[str] = set()
+    for dataset_name in dedupe_datasets:
+        evaluation_dataset = load_and_process_dataset(dataset_name)
+        blocked_prompt_hashes.update(collect_prompt_hashes(evaluation_dataset))
+
+    before_deduplication = len(dataset)
+    if blocked_prompt_hashes:
+        dataset = dataset.filter(
+            lambda row: prompt_hashes(row["turns"]).isdisjoint(
+                blocked_prompt_hashes
+            ),
+            desc="Removing evaluation-prompt overlaps",
+        )
+    removed_overlaps = before_deduplication - len(dataset)
+    print(
+        "Calibration prompt deduplication: "
+        f"source={args.dataset}, blocked_datasets={dedupe_datasets}, "
+        f"removed={removed_overlaps}"
+    )
+
     if len(dataset) > args.max_samples:
         dataset = dataset.shuffle(seed=0).select(range(args.max_samples))
+    elif len(dataset) < args.max_samples:
+        print(
+            f"Calibration source contains {len(dataset)} usable prompts; "
+            f"requested max_samples={args.max_samples}. Using all available prompts."
+        )
 
     recovery_memory = RecoveryMemory(freq_threshold=0)
 
@@ -337,7 +352,7 @@ def main() -> None:
     print(f"Calibration stop_token_ids={stop_token_ids}")
 
     total_divergences = 0
-    for idx in tqdm(range(len(dataset)), desc="Calibrating ReTree recovery memory"):
+    for idx in tqdm(range(len(dataset)), desc="Initializing ReTree recovery prior"):
         instance = dataset[idx]
         messages = [{"role": "user", "content": instance["turns"][0]}]
         input_text = tokenizer.apply_chat_template(
@@ -368,7 +383,7 @@ def main() -> None:
     else:
         output_file = args.output_file
 
-    recovery_memory.save(output_file)
+    recovery_memory.save_prior(output_file)
     print(f"\n{'='*50}")
     print("ReTree recovery-memory calibration complete!")
     print(f"Tree budget: {args.tree_budget}")

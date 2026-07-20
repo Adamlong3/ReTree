@@ -131,6 +131,18 @@ METHOD_LABELS = {
 }
 
 
+def synchronize_online_memory(
+    recovery_memory: RecoveryMemory,
+    online_counts_before_request: dict[tuple[int, int], int],
+) -> None:
+    """Synchronize completed online events before the next request batch."""
+    local_delta = recovery_memory.online_delta_since(online_counts_before_request)
+    rank_deltas = dist.all_gather(local_delta)
+    for source_rank, delta in enumerate(rank_deltas):
+        if source_rank != dist.rank():
+            recovery_memory.apply_online_delta(delta)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-name-or-path", type=str, required=True)
@@ -171,6 +183,13 @@ def main() -> None:
         "--recovery-online-update",
         dest="recovery_online_update",
         action="store_true",
+        help="Enable causal online recovery-memory evolution (paper default).",
+    )
+    parser.add_argument(
+        "--no-recovery-online-update",
+        dest="recovery_online_update",
+        action="store_false",
+        help="Disable online evolution for an offline-prior-only ablation.",
     )
     parser.add_argument(
         "--recovery-record-top-k",
@@ -182,8 +201,9 @@ def main() -> None:
         "--recovery-rescue-top-k",
         dest="recovery_rescue_top_k",
         type=int,
-        default=16,
+        default=8,
     )
+    parser.set_defaults(recovery_online_update=True)
     args = parser.parse_args()
 
     active_methods = [m.strip() for m in args.methods.split(",")]
@@ -261,9 +281,11 @@ def main() -> None:
                 total_pairs = recovery_memory.total_pairs()
                 total_rej = recovery_memory.total_rejections()
                 top5 = recovery_memory.top_k_pairs(5)
-                print(f"Recovery: loaded memory from {args.recovery_memory_file}")
                 print(
-                    f"Recovery: total pairs={total_pairs}, total rejections={total_rej}"
+                    f"Recovery: loaded fixed prior from {args.recovery_memory_file}"
+                )
+                print(
+                    f"Recovery: prior pairs={total_pairs}, prior events={total_rej}"
                 )
                 print(f"Recovery: top-5 pairs={top5}")
                 print(f"Recovery: logit threshold tau={args.recovery_threshold}")
@@ -273,8 +295,8 @@ def main() -> None:
             )
             if dist.is_main():
                 print(
-                    "Recovery: starting with empty memory "
-                    f"(online mode, lambda={args.recovery_freq_threshold})"
+                    "Recovery: starting with an empty prior "
+                    f"(lambda={args.recovery_freq_threshold})"
                 )
                 print(f"Recovery: logit threshold tau={args.recovery_threshold}")
 
@@ -370,12 +392,10 @@ def main() -> None:
         )
 
     responses = []
-    accuracy_records = []
-    indices = range(dist.rank(), len(dataset), dist.size())
-    for idx in tqdm(indices, disable=not dist.is_main()):
-        instance = dataset[idx]
+
+    def run_instance(instance) -> None:
         messages = []
-        for turn_index, user_content in enumerate(instance["turns"]):
+        for user_content in instance["turns"]:
             messages.append({"role": "user", "content": user_content})
             input_text = tokenizer.apply_chat_template(
                 messages,
@@ -454,8 +474,6 @@ def main() -> None:
                     p = extract_code_answer(out_text)
                 response[f"{key}_pred"] = p
 
-            ref = instance.get("ref_answer")
-
             response["ref_answer"] = instance.get("ref_answer")
 
             last_method = active_methods[-1]
@@ -467,6 +485,27 @@ def main() -> None:
             )
             messages.append({"role": "assistant", "content": last_output_text})
             responses.append(response)
+
+    online_evolution_enabled = need_retree and args.recovery_online_update
+    batch_starts = range(0, len(dataset), dist.size())
+    num_request_batches = (len(dataset) + dist.size() - 1) // dist.size()
+    for batch_start in tqdm(
+        batch_starts,
+        total=num_request_batches,
+        disable=not dist.is_main(),
+    ):
+        online_counts_before_request = (
+            recovery_memory.online_counts() if online_evolution_enabled else {}
+        )
+        idx = batch_start + dist.rank()
+        if idx < len(dataset):
+            run_instance(dataset[idx])
+
+        if online_evolution_enabled:
+            synchronize_online_memory(
+                recovery_memory,
+                online_counts_before_request,
+            )
 
     accuracy_records_by_method = {key: [] for key in active_methods}
 
@@ -525,10 +564,20 @@ def main() -> None:
         print(f"Recovery Total Rescued Tokens: {total_rescued}")
 
     if recovery_memory is not None:
-        print(f"Recovery Memory Total Pairs: {recovery_memory.total_pairs()}")
         print(
-            "Recovery Memory Total Rejections Recorded: "
-            f"{recovery_memory.total_rejections()}"
+            "Recovery Prior: "
+            f"pairs={recovery_memory.prior_total_pairs()}, "
+            f"events={recovery_memory.prior_total_events()}"
+        )
+        print(
+            "Recovery Online Delta: "
+            f"pairs={recovery_memory.online_total_pairs()}, "
+            f"events={recovery_memory.online_total_events()}"
+        )
+        print(
+            "Recovery Combined Memory: "
+            f"pairs={recovery_memory.total_pairs()}, "
+            f"events={recovery_memory.total_rejections()}"
         )
         top10 = recovery_memory.top_k_pairs(10)
         print(f"Recovery Memory Top-10 pairs: {top10}")
@@ -539,10 +588,10 @@ def main() -> None:
                 f"_lambda{args.recovery_freq_threshold}"
                 f"_tau{args.recovery_threshold}_online.json"
             )
-            recovery_memory.save(memory_path)
-            print(f"Recovery memory saved to {memory_path}")
+            recovery_memory.save_runtime_state(memory_path)
+            print(f"Recovery runtime state saved to {memory_path}")
         else:
-            print("Recovery memory not saved because recovery_online_update=False.")
+            print("Recovery runtime state not saved because online update is disabled.")
 
     if dist.is_main():
         print(f"Recovery online update: {args.recovery_online_update}")

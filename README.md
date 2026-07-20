@@ -24,7 +24,7 @@ tasks.
 At each decoding round, ReTree drafts a block distribution, constructs a
 budgeted token tree, verifies the tree with one target-model pass, then commits
 the longest target-supported path. If verification stops at a mismatch, the
-recovery module can accept an alternative sibling only when the learned
+recovery module can accept an alternative sibling only when the evolving
 recovery memory and target logits both support it.
 
 In the benchmark logs, the full ReTree configuration is:
@@ -37,6 +37,22 @@ python benchmark.py --methods dflash,ddtree,retree --recovery-memory-file ...
 The printed method name `ReTree` is the full path-guided tree plus
 target-gated recovery path. Plain `DDTree` under `rank_gated_ngram` is the
 path-guided tree without recovery.
+
+## Recovery Memory Lifecycle
+
+ReTree initializes a fixed recovery prior with a forward-only calibration pass
+on training data disjoint from evaluation. It records only top-ranked,
+non-stop sibling divergences exposed when exact tree following actually stops.
+The released pipeline uses GSM8K train, the complete original MATH train split,
+MBPP train, and CNN/DailyMail train, then removes normalized-prompt collisions
+against all evaluation tasks before calibration.
+
+Each benchmark run reloads the same fixed prior and enables causal online
+evolution by default. At a mismatch, frequency gates are snapshotted before the
+current sibling-target pairs are added to the online delta, so an event cannot
+make itself recoverable. Distributed workers synchronize completed deltas
+before the next request batch. Use `--no-recovery-online-update` only for the
+offline-prior-only ablation.
 
 ## Results
 
@@ -97,14 +113,15 @@ torchrun --nproc_per_node=4 benchmark.py \
   --max-new-tokens 2048 \
   --temperature 0.0 \
   --methods dflash,ddtree,retree \
-  --recovery-memory-file recovery_memory/alltask/8B/tb16/recovery_alltask_8B_tb16.json \
+  --recovery-memory-file recovery_memory/alltask/train_disjoint_v1/8B/tb16/recovery_alltask_8B_tb16.json \
+  --recovery-online-update \
   --recovery-freq-threshold 6 \
   --recovery-threshold 0.01 \
   --recovery-record-top-k 8 \
   --recovery-rescue-top-k 8
 ```
 
-Build a task-level recovery-memory file:
+Build one task-domain prior file:
 
 ```bash
 DDTREE_TREE_STRATEGY=rank_gated_ngram \
@@ -113,12 +130,13 @@ python retree_calibrate.py \
   --draft-name-or-path z-lab/Qwen3-8B-DFlash-b16 \
   --block-size 16 \
   --tree-budget 16 \
-  --dataset gsm8k \
+  --dataset gsm8k_train \
   --max-samples 2000 \
   --max-new-tokens 512 \
   --temperature 0.6 \
   --record-top-k 8 \
-  --output-file recovery_memory/calibration/8B/tb16_rankcap8/recovery_gsm8k_2000_8B_tb16.json
+  --dedupe-against gsm8k,math500,aime25,humaneval,mbpp,livecodebench,mt-bench \
+  --output-file recovery_memory/calibration/train_disjoint_v1/8B/tb16_rankcap8/recovery_gsm8k_train_2000_8B_tb16.json
 ```
 
 The full experiment launcher is configurable by environment variables:
@@ -153,11 +171,11 @@ git.
 ## Repository Layout
 
 - `benchmark.py`: distributed benchmark entry point.
-- `retree_calibrate.py`: offline recovery-memory calibration.
+- `retree_calibrate.py`: disjoint-data initialization of the fixed recovery prior.
 - `ddtree.py`: tree construction, one-pass verification, and cache compaction.
 - `retree.py`: ReTree decoding path with target-gated sibling recovery.
 - `dflash.py`: linear DFlash speculative decoding baseline.
-- `model/recovery.py`: recovery memory and target-logit consistency gate.
+- `model/recovery.py`: fixed prior, online delta, and target-logit consistency gate.
 - `model/dflash.py`: DFlash draft model implementation.
 - `run_all.sh`: full calibration, all-task memory build, benchmark, and log-summary pipeline.
 
